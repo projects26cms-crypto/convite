@@ -5,6 +5,8 @@ export type Par = { invitadoId: string; mesaId: string };
 export type Reparto = {
   pares: Par[];
   sinSitio: number;
+  /** Grupos que no cupieron enteros en una mesa y hubo que repartir. */
+  partidos: number;
 };
 
 /**
@@ -63,6 +65,7 @@ export function repartir({
 
   const pares: Par[] = [];
   let sinSitio = 0;
+  let partidos = 0;
 
   for (const [clave, miembros] of porTamano) {
     const grupoId = clave.startsWith("suelto:") ? null : clave;
@@ -88,6 +91,8 @@ export function repartir({
       continue;
     }
 
+    if (miembros.length > 1) partidos++;
+
     const restantes = [...miembros];
     const porHueco = [...donde].sort(
       (a, b) => (libres.get(b.id) ?? 0) - (libres.get(a.id) ?? 0),
@@ -107,5 +112,5 @@ export function repartir({
     sinSitio += restantes.length;
   }
 
-  return { pares, sinSitio };
+  return { pares, sinSitio, partidos };
 }

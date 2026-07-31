@@ -34,6 +34,7 @@ import {
   SALA,
   SEPARACIONES,
   buscarHueco,
+  distribuirSinSolapes,
   resolverPosicion,
   sugerirMesas,
   type MesaNueva,
@@ -250,13 +251,12 @@ export function Planificador({
       const mesa = mesas.find((m) => m.id === mesaId);
       if (!mesa) return;
 
-      const destino = resolverPosicion(
-        mesa,
-        x,
-        y,
-        mesas.filter((m) => m.id !== mesaId),
-        separacion,
-      );
+      const otras = mesas.filter((m) => m.id !== mesaId);
+      // Primero se intenta apartar de quien estorbe; si la zona está muy
+      // llena, se busca el hueco válido más cercano en espiral.
+      const destino =
+        resolverPosicion(mesa, x, y, otras, separacion) ??
+        buscarHueco(mesa, x, y, otras, separacion);
 
       if (!destino) {
         setNota("Ahí no cabe sin invadir la separación. La mesa vuelve a su sitio.");
@@ -376,20 +376,33 @@ export function Planificador({
     );
   }
 
-  function aplicarPlantilla(plantillaId: string, cuantas: number, cap: number, enPres: number) {
+  function aplicarPlantilla(
+    plantillaId: string,
+    cuantas: number,
+    cap: number,
+    enPres: number,
+  ) {
     const plantilla = PLANTILLAS.find((p) => p.id === plantillaId);
     if (!plantilla) return;
-    const nuevas = plantilla.generar(cuantas, cap, enPres);
+
+    const { colocadas, descartadas } = distribuirSinSolapes(
+      plantilla.generar(cuantas, cap, enPres, separacion),
+      separacion,
+    );
 
     guardar(async () => {
       if (mesas.length > 0) await borrarTodasLasMesas(slug);
-      const creadas = await crearMesas(slug, nuevas);
+      const creadas = await crearMesas(slug, colocadas);
       setMesas(creadas);
       setAsientos({});
       setSeleccionada(null);
       // Montar una sala entera no se deshace: se vuelve a montar.
       setPila([]);
-      setNota(null);
+      setNota(
+        descartadas > 0
+          ? `Montadas ${colocadas.length - 1} mesas. ${descartadas} no caben en la sala con esta separación: baja el nivel o sube las plazas por mesa.`
+          : null,
+      );
     });
   }
 
@@ -514,7 +527,7 @@ export function Planificador({
   // ------------------------------------------------------ reparto automático
 
   function sentarPorFamilias() {
-    const { pares, sinSitio } = repartir({
+    const { pares, sinSitio, partidos } = repartir({
       invitados,
       grupos,
       mesas,
@@ -551,11 +564,14 @@ export function Planificador({
       },
     });
 
-    setNota(
-      sinSitio > 0
-        ? `${pares.length} sentados. ${sinSitio} se quedan fuera: faltan plazas.`
-        : `${pares.length} sentados por familias.`,
-    );
+    const aviso = [
+      `${pares.length} sentados por familias.`,
+      sinSitio > 0 && `${sinSitio} se quedan fuera: faltan plazas.`,
+      partidos > 0 &&
+        `${partidos} ${partidos === 1 ? "grupo no cabía entero y se ha repartido" : "grupos no cabían enteros y se han repartido"}: con una mesa más caben juntos.`,
+    ].filter(Boolean);
+
+    setNota(aviso.join(" "));
   }
 
   // --------------------------------------------------------------- arrastre
