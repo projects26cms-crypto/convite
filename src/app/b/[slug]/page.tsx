@@ -39,7 +39,7 @@ const secciones = [
     segmento: "mesas",
     nombre: "Mesas",
     descripcion: "Colocar la sala y sentar a la gente",
-    lista: false,
+    lista: true,
   },
   {
     segmento: "plano",

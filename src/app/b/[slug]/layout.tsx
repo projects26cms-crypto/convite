@@ -19,7 +19,7 @@ export default async function LayoutBoda({
   return (
     <div className="flex flex-1 flex-col">
       <header className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-6 py-3">
+        <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-6">
           <Link
             href={`/b/${slug}`}
             className="flex min-w-0 items-baseline gap-3"

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 const SECCIONES = [
   { segmento: "invitados", etiqueta: "Invitados", activa: true },
-  { segmento: "mesas", etiqueta: "Mesas", activa: false },
+  { segmento: "mesas", etiqueta: "Mesas", activa: true },
   { segmento: "plano", etiqueta: "Plano", activa: false },
 ];
 
