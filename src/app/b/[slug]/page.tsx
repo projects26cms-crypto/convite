@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { obtenerBodaPorSlug } from "@/lib/datos/bodas";
@@ -28,9 +29,24 @@ function formatearFecha(fecha: string): string {
 }
 
 const secciones = [
-  { nombre: "Invitados", descripcion: "Quién viene y en qué grupo va" },
-  { nombre: "Mesas", descripcion: "Colocar la sala y sentar a la gente" },
-  { nombre: "Plano", descripcion: "Listados e impresión para el banquete" },
+  {
+    segmento: "invitados",
+    nombre: "Invitados",
+    descripcion: "Quién viene y en qué grupo va",
+    lista: true,
+  },
+  {
+    segmento: "mesas",
+    nombre: "Mesas",
+    descripcion: "Colocar la sala y sentar a la gente",
+    lista: false,
+  },
+  {
+    segmento: "plano",
+    nombre: "Plano",
+    descripcion: "Listados e impresión para el banquete",
+    lista: false,
+  },
 ];
 
 export default async function PaginaBoda({ params }: Props) {
@@ -40,12 +56,8 @@ export default async function PaginaBoda({ params }: Props) {
   if (!boda) notFound();
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-16 sm:py-24">
-      <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-        Convite
-      </p>
-
-      <h1 className="mt-4 font-display text-4xl leading-tight tracking-tight sm:text-5xl">
+    <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-16 sm:py-20">
+      <h1 className="font-display text-4xl leading-tight tracking-tight sm:text-5xl">
         {boda.name}
       </h1>
 
@@ -59,19 +71,37 @@ export default async function PaginaBoda({ params }: Props) {
 
       <ul className="mt-12 divide-y divide-border border-y border-border">
         {secciones.map((seccion) => (
-          <li
-            key={seccion.nombre}
-            className="flex items-baseline justify-between gap-6 py-4"
-          >
-            <div>
-              <p className="font-medium">{seccion.nombre}</p>
-              <p className="text-sm text-muted-foreground">
-                {seccion.descripcion}
-              </p>
-            </div>
-            <span className="shrink-0 text-xs uppercase tracking-[0.14em] text-muted-foreground">
-              Pronto
-            </span>
+          <li key={seccion.segmento}>
+            {seccion.lista ? (
+              <Link
+                href={`/b/${slug}/${seccion.segmento}`}
+                className="flex items-baseline justify-between gap-6 py-4 transition-colors hover:bg-secondary/60"
+              >
+                <span>
+                  <span className="block font-medium">{seccion.nombre}</span>
+                  <span className="block text-sm text-muted-foreground">
+                    {seccion.descripcion}
+                  </span>
+                </span>
+                <span aria-hidden className="shrink-0 text-muted-foreground">
+                  →
+                </span>
+              </Link>
+            ) : (
+              <div className="flex items-baseline justify-between gap-6 py-4">
+                <span>
+                  <span className="block font-medium text-muted-foreground">
+                    {seccion.nombre}
+                  </span>
+                  <span className="block text-sm text-muted-foreground">
+                    {seccion.descripcion}
+                  </span>
+                </span>
+                <span className="shrink-0 text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                  Pronto
+                </span>
+              </div>
+            )}
           </li>
         ))}
       </ul>
