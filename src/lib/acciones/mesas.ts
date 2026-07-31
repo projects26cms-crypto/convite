@@ -2,7 +2,7 @@
 
 import { obtenerBodaPorSlug } from "@/lib/datos/bodas";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { ajustarARejilla, encajarEnLienzo, type MesaNueva } from "@/lib/mesas";
+import { ajustarARejilla, encajarEnSala, type MesaNueva } from "@/lib/mesas";
 import type { Boda, FormaMesa, Mesa } from "@/lib/tipos";
 
 const FORMAS: FormaMesa[] = ["redonda", "rectangular", "imperial"];
@@ -13,11 +13,13 @@ async function resolverBoda(slug: string): Promise<Boda> {
   return boda;
 }
 
-function sanear(mesa: MesaNueva): MesaNueva {
+function sanear(mesa: MesaNueva) {
   const forma = FORMAS.includes(mesa.shape) ? mesa.shape : "redonda";
   const capacidad = Math.min(40, Math.max(1, Math.round(mesa.capacity)));
-  const { x, y } = encajarEnLienzo(
+  const giro = ((Math.round(mesa.rotation) % 360) + 360) % 360;
+  const { x, y } = encajarEnSala(
     { shape: forma, capacity: capacidad },
+    giro,
     ajustarARejilla(mesa.pos_x),
     ajustarARejilla(mesa.pos_y),
   );
@@ -28,7 +30,8 @@ function sanear(mesa: MesaNueva): MesaNueva {
     capacity: capacidad,
     pos_x: x,
     pos_y: y,
-    rotation: 0,
+    rotation: giro,
+    is_head: mesa.is_head === true,
   };
 }
 
@@ -72,7 +75,12 @@ export async function moverMesa(
 export async function actualizarMesa(
   slug: string,
   mesaId: string,
-  cambios: { name?: string; shape?: FormaMesa; capacity?: number },
+  cambios: {
+    name?: string;
+    shape?: FormaMesa;
+    capacity?: number;
+    rotation?: number;
+  },
 ): Promise<void> {
   const boda = await resolverBoda(slug);
   const parche: Record<string, unknown> = {};
@@ -88,6 +96,9 @@ export async function actualizarMesa(
   if (cambios.capacity !== undefined) {
     parche.capacity = Math.min(40, Math.max(1, Math.round(cambios.capacity)));
   }
+  if (cambios.rotation !== undefined) {
+    parche.rotation = ((Math.round(cambios.rotation) % 360) + 360) % 360;
+  }
   if (Object.keys(parche).length === 0) return;
 
   const { error } = await supabaseAdmin()
@@ -102,8 +113,18 @@ export async function actualizarMesa(
 /** Al borrar la mesa, sus invitados vuelven a la lista de sin sentar. */
 export async function borrarMesa(slug: string, mesaId: string): Promise<void> {
   const boda = await resolverBoda(slug);
+  const db = supabaseAdmin();
 
-  const { error } = await supabaseAdmin()
+  const { data } = await db
+    .from("event_tables")
+    .select("is_head")
+    .eq("id", mesaId)
+    .eq("wedding_id", boda.id)
+    .maybeSingle();
+
+  if (data?.is_head) throw new Error("La presidencial no se puede borrar");
+
+  const { error } = await db
     .from("event_tables")
     .delete()
     .eq("id", mesaId)
@@ -120,7 +141,34 @@ export async function borrarTodasLasMesas(slug: string): Promise<void> {
     .delete()
     .eq("wedding_id", boda.id);
 
-  if (error) throw new Error(`No se pudieron borrar las mesas: ${error.message}`);
+  if (error)
+    throw new Error(`No se pudieron borrar las mesas: ${error.message}`);
+}
+
+async function comprobarPertenencia(
+  bodaId: string,
+  invitados: string[],
+  mesas: string[],
+): Promise<void> {
+  const db = supabaseAdmin();
+  const [deInvitados, deMesas] = await Promise.all([
+    db.from("guests").select("id").eq("wedding_id", bodaId).in("id", invitados),
+    db
+      .from("event_tables")
+      .select("id")
+      .eq("wedding_id", bodaId)
+      .in("id", mesas),
+  ]);
+
+  const invitadosOk = new Set((deInvitados.data ?? []).map((f) => f.id));
+  const mesasOk = new Set((deMesas.data ?? []).map((f) => f.id));
+
+  if (
+    invitados.some((id) => !invitadosOk.has(id)) ||
+    mesas.some((id) => !mesasOk.has(id))
+  ) {
+    throw new Error("Invitado o mesa no válidos");
+  }
 }
 
 export async function sentar(
@@ -128,35 +176,31 @@ export async function sentar(
   invitadoId: string,
   mesaId: string,
 ): Promise<void> {
+  await sentarEnBloque(slug, [{ invitadoId, mesaId }]);
+}
+
+/** Una sola escritura para todo el reparto automático. */
+export async function sentarEnBloque(
+  slug: string,
+  pares: { invitadoId: string; mesaId: string }[],
+): Promise<void> {
+  if (pares.length === 0) return;
   const boda = await resolverBoda(slug);
-  const db = supabaseAdmin();
 
-  // Ni el invitado ni la mesa pueden ser de otra boda.
-  const [invitado, mesa] = await Promise.all([
-    db
-      .from("guests")
-      .select("id")
-      .eq("id", invitadoId)
-      .eq("wedding_id", boda.id)
-      .maybeSingle(),
-    db
-      .from("event_tables")
-      .select("id")
-      .eq("id", mesaId)
-      .eq("wedding_id", boda.id)
-      .maybeSingle(),
-  ]);
+  await comprobarPertenencia(
+    boda.id,
+    [...new Set(pares.map((p) => p.invitadoId))],
+    [...new Set(pares.map((p) => p.mesaId))],
+  );
 
-  if (!invitado.data || !mesa.data) throw new Error("Invitado o mesa no válidos");
-
-  const { error } = await db
+  const { error } = await supabaseAdmin()
     .from("seat_assignments")
     .upsert(
-      {
+      pares.map((p) => ({
         wedding_id: boda.id,
-        table_id: mesaId,
-        guest_id: invitadoId,
-      },
+        table_id: p.mesaId,
+        guest_id: p.invitadoId,
+      })),
       { onConflict: "guest_id" },
     );
 
@@ -165,15 +209,16 @@ export async function sentar(
 
 export async function levantar(
   slug: string,
-  invitadoId: string,
+  invitados: string[],
 ): Promise<void> {
+  if (invitados.length === 0) return;
   const boda = await resolverBoda(slug);
 
   const { error } = await supabaseAdmin()
     .from("seat_assignments")
     .delete()
-    .eq("guest_id", invitadoId)
-    .eq("wedding_id", boda.id);
+    .eq("wedding_id", boda.id)
+    .in("guest_id", invitados);
 
   if (error) throw new Error(`No se pudo levantar: ${error.message}`);
 }

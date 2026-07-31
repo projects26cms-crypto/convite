@@ -46,8 +46,14 @@ create table event_tables (
   pos_x       numeric not null default 0,
   pos_y       numeric not null default 0,
   rotation    numeric not null default 0,
+  is_head     boolean not null default false,   -- la presidencial
   created_at  timestamptz not null default now()
 );
+
+-- Como mucho una presidencial por boda.
+create unique index una_presidencial_por_boda
+  on event_tables (wedding_id)
+  where is_head;
 
 create table seat_assignments (
   id          uuid primary key default gen_random_uuid(),

@@ -39,7 +39,9 @@ export function CaraChip({
           ? "shadow-lg ring-1 ring-foreground/20"
           : "hover:bg-secondary",
       )}
-      title={grupo ? `${invitado.full_name} · ${grupo.name}` : invitado.full_name}
+      title={
+        grupo ? `${invitado.full_name} · ${grupo.name}` : invitado.full_name
+      }
     >
       {etiquetaInvitado(invitado)}
     </span>
@@ -80,8 +82,8 @@ export function ChipInvitado({
 
 const CHIPS_VISIBLES: Record<string, number> = {
   redonda: 6,
-  rectangular: 4,
-  imperial: 5,
+  rectangular: 3,
+  imperial: 4,
 };
 
 export function MesaEnLienzo({
@@ -89,6 +91,8 @@ export function MesaEnLienzo({
   sentados,
   grupoDe,
   escala,
+  halo,
+  mostrarHalo,
   resaltada,
   seleccionada,
   alSeleccionar,
@@ -97,12 +101,15 @@ export function MesaEnLienzo({
   sentados: Invitado[];
   grupoDe: (invitado: Invitado) => GrupoInvitados | undefined;
   escala: number;
+  halo: number;
+  mostrarHalo: boolean;
   resaltada: boolean;
   seleccionada: boolean;
   alSeleccionar: () => void;
 }) {
   const { ancho, alto } = tamanoMesa(mesa);
   const pasada = sentados.length > mesa.capacity;
+  const redonda = mesa.shape === "redonda";
 
   const {
     attributes,
@@ -122,7 +129,7 @@ export function MesaEnLienzo({
   const dx = (transform?.x ?? 0) / escala;
   const dy = (transform?.y ?? 0) / escala;
 
-  const visibles = CHIPS_VISIBLES[mesa.shape] ?? 5;
+  const visibles = CHIPS_VISIBLES[mesa.shape] ?? 4;
   const ocultos = sentados.length - visibles;
 
   return (
@@ -133,17 +140,32 @@ export function MesaEnLienzo({
         top: mesa.pos_y - alto / 2 + dy,
         width: ancho,
         height: alto,
-        zIndex: isDragging ? 30 : seleccionada ? 20 : 10,
+        transform: mesa.rotation ? `rotate(${mesa.rotation}deg)` : undefined,
+        zIndex: isDragging ? 30 : mesa.is_head ? 22 : seleccionada ? 20 : 10,
       }}
       className={cn("absolute", isDragging && "cursor-grabbing")}
     >
+      {/* Zona de sillas y paso: dos halos que se tocan son la separación mínima. */}
+      {mostrarHalo && (
+        <div
+          aria-hidden
+          style={{ inset: -halo }}
+          className={cn(
+            "pointer-events-none absolute border border-dashed border-foreground/25 bg-foreground/[0.04]",
+            redonda ? "rounded-full" : "rounded-xl",
+          )}
+        />
+      )}
+
       <div
         ref={anclarSoltar}
         onClick={alSeleccionar}
         className={cn(
-          "flex h-full w-full flex-col items-center overflow-hidden border-2 bg-card p-2",
-          mesa.shape === "redonda" ? "rounded-full" : "rounded-lg",
-          "border-foreground/70",
+          "relative flex h-full w-full flex-col items-center overflow-hidden p-2",
+          redonda ? "rounded-full" : "rounded-lg",
+          mesa.is_head
+            ? "border-[3px] border-foreground bg-accent"
+            : "border-2 border-foreground/70 bg-card",
           resaltada && "border-novia ring-4 ring-novia/25",
           isOver && "border-foreground ring-4 ring-foreground/25",
           seleccionada && "ring-2 ring-foreground/40",
@@ -156,9 +178,17 @@ export function MesaEnLienzo({
           {...listeners}
           {...attributes}
           aria-label={`Mover ${mesa.name}`}
+          style={{
+            transform: mesa.rotation ? `rotate(${-mesa.rotation}deg)` : undefined,
+          }}
           className="w-full cursor-grab touch-none px-1 active:cursor-grabbing"
         >
-          <span className="block truncate font-display text-[13px] leading-tight">
+          <span
+            className={cn(
+              "block truncate font-display leading-tight",
+              mesa.is_head ? "text-[15px] font-medium" : "text-[13px]",
+            )}
+          >
             {mesa.name}
           </span>
           <span
@@ -171,7 +201,7 @@ export function MesaEnLienzo({
           </span>
         </button>
 
-        <div className="mt-1 w-full min-h-0 flex-1 space-y-[2px] overflow-hidden px-0.5">
+        <div className="mt-1 min-h-0 w-full flex-1 space-y-[2px] overflow-hidden px-0.5">
           {sentados.slice(0, visibles).map((invitado) => (
             <ChipInvitado
               key={invitado.id}

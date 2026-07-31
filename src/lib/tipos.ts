@@ -43,6 +43,8 @@ export type Mesa = {
   pos_x: number;
   pos_y: number;
   rotation: number;
+  /** La presidencial. Solo puede haber una por boda y no se puede borrar. */
+  is_head: boolean;
   created_at: string;
 };
 
