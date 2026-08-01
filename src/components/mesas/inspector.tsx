@@ -15,6 +15,8 @@ export function Inspector({
   seleccion,
   onCambiar,
   onLevantar,
+  onVaciar,
+  onFijar,
   onDuplicar,
   onBorrar,
   onCerrar,
@@ -26,6 +28,8 @@ export function Inspector({
   seleccion: Set<string>;
   onCambiar: (cambios: Partial<Mesa>, persistir?: boolean) => void;
   onLevantar: (invitadoId: string) => void;
+  onVaciar: () => void;
+  onFijar: (fijada: boolean) => void;
   onDuplicar: () => void;
   onBorrar: () => void;
   onCerrar: () => void;
@@ -99,6 +103,15 @@ export function Inspector({
 
       {pestana === "gente" ? (
         <div className="min-h-24 flex-1 space-y-1 overflow-y-auto p-2">
+          {sentados.length > 0 && (
+            <button
+              type="button"
+              onClick={onVaciar}
+              className="mb-1 w-full rounded-sm px-2 py-1 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+            >
+              Vaciar la mesa · devuelve a los {sentados.length} a la lista
+            </button>
+          )}
           {sentados.length === 0 ? (
             <p className="px-2 py-8 text-center text-sm text-muted-foreground">
               Mesa vacía. Arrastra gente aquí, o marca en la lista y haz clic en
@@ -197,6 +210,21 @@ export function Inspector({
               }
               className="mt-1 h-9 w-full rounded-md border border-input bg-card px-2 text-sm tabular-nums"
             />
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={mesa.is_locked}
+              onChange={(e) => onFijar(e.target.checked)}
+              className="size-3.5 accent-[var(--foreground)]"
+            />
+            <span>
+              Fijar la mesa
+              <span className="block text-xs text-muted-foreground">
+                El reparto automático no la toca
+              </span>
+            </span>
           </label>
 
           <div className="text-sm">

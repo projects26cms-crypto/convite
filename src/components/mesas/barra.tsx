@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import { PanelReglas } from "@/components/mesas/reglas";
 import { Button } from "@/components/ui/button";
 import {
   CAPACIDAD_POR_DEFECTO,
@@ -12,8 +13,10 @@ import {
   sugerirMesas,
   type NivelSeparacion,
 } from "@/lib/mesas";
-import type { Invitado, Mesa } from "@/lib/tipos";
+import type { Invitado, Mesa, Regla, TipoRegla } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
+
+export type Alcance = "todos" | "mesa" | "marcados";
 
 function normalizar(valor: string): string {
   return valor
@@ -121,6 +124,14 @@ export function BarraHerramientas({
   onSentarFamilias,
   onPlantilla,
   onIrA,
+  reglas,
+  incumplidas,
+  onCrearRegla,
+  onBorrarRegla,
+  alcance,
+  setAlcance,
+  haySeleccion,
+  hayMesaElegida,
 }: {
   mesas: number;
   todasLasMesas: Mesa[];
@@ -151,8 +162,18 @@ export function BarraHerramientas({
     enPres: number,
   ) => void;
   onIrA: (invitadoId: string, mesaId: string | null) => void;
+  reglas: Regla[];
+  incumplidas: Set<string>;
+  onCrearRegla: (kind: TipoRegla, a: string, b: string) => void;
+  onBorrarRegla: (id: string) => void;
+  alcance: Alcance;
+  setAlcance: (v: Alcance) => void;
+  haySeleccion: boolean;
+  hayMesaElegida: boolean;
 }) {
-  const [panel, setPanel] = useState<"plantillas" | "sala" | null>(null);
+  const [panel, setPanel] = useState<
+    "plantillas" | "sala" | "reglas" | null
+  >(null);
   const [capacidad, setCapacidad] = useState(CAPACIDAD_POR_DEFECTO);
   const [enPresidencial, setEnPresidencial] = useState(
     PRESIDENCIAL_POR_DEFECTO.plazas,
@@ -161,8 +182,12 @@ export function BarraHerramientas({
   const [cuantas, setCuantas] = useState(sugeridas);
   const [confirmando, setConfirmando] = useState<string | null>(null);
 
-  const alterna = (cual: "plantillas" | "sala") =>
+  const alterna = (cual: "plantillas" | "sala" | "reglas") =>
     setPanel((previo) => (previo === cual ? null : cual));
+
+  const sinCumplir = reglas.filter(
+    (r) => incumplidas.has(r.guest_a) || incumplidas.has(r.guest_b),
+  ).length;
 
   return (
     <div className="border-b border-border bg-background">
@@ -178,9 +203,52 @@ export function BarraHerramientas({
         >
           Plantillas
         </Button>
-        <Button size="sm" variant="secondary" onClick={onSentarFamilias}>
-          Sentar por familias
+        <span className="flex items-center overflow-hidden rounded-md border border-input">
+          <Button
+            size="sm"
+            variant="secondary"
+            className="rounded-none border-0"
+            onClick={onSentarFamilias}
+          >
+            Sentar por familias
+          </Button>
+          <select
+            value={alcance}
+            onChange={(e) => setAlcance(e.target.value as Alcance)}
+            aria-label="A quién afecta el reparto"
+            className="h-8 border-l border-input bg-card px-1.5 text-xs"
+          >
+            <option value="todos">a todos los que faltan</option>
+            <option value="mesa" disabled={!hayMesaElegida}>
+              solo a esta mesa
+            </option>
+            <option value="marcados" disabled={!haySeleccion}>
+              solo a los marcados
+            </option>
+          </select>
+        </span>
+
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => alterna("reglas")}
+          aria-expanded={panel === "reglas"}
+        >
+          Reglas
+          {reglas.length > 0 && (
+            <span
+              className={cn(
+                "ml-1 rounded-sm px-1 text-xs tabular-nums",
+                sinCumplir > 0
+                  ? "bg-destructive text-white"
+                  : "bg-secondary text-muted-foreground",
+              )}
+            >
+              {sinCumplir > 0 ? sinCumplir : reglas.length}
+            </span>
+          )}
         </Button>
+
         <Button
           size="sm"
           variant="ghost"
@@ -227,6 +295,18 @@ export function BarraHerramientas({
           </span>
         </div>
       </div>
+
+      {panel === "reglas" && (
+        <PanelReglas
+          invitados={invitados}
+          reglas={reglas}
+          asientos={asientos}
+          incumplidas={incumplidas}
+          onCrear={onCrearRegla}
+          onBorrar={onBorrarRegla}
+          onIrA={onIrA}
+        />
+      )}
 
       {panel === "sala" && (
         <div className="flex flex-wrap items-end gap-5 border-t border-border bg-card px-4 py-3">

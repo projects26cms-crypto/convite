@@ -4,7 +4,11 @@ import { notFound } from "next/navigation";
 import { Planificador } from "@/components/mesas/planificador";
 import { obtenerBodaPorSlug } from "@/lib/datos/bodas";
 import { listarGrupos, listarInvitados } from "@/lib/datos/invitados";
-import { listarAsignaciones, listarMesas } from "@/lib/datos/mesas";
+import {
+  listarAsignaciones,
+  listarMesas,
+  listarReglas,
+} from "@/lib/datos/mesas";
 
 export const dynamic = "force-dynamic";
 
@@ -21,11 +25,12 @@ export default async function PaginaMesas({ params }: Props) {
 
   if (!boda) notFound();
 
-  const [invitados, grupos, mesas, asignaciones] = await Promise.all([
+  const [invitados, grupos, mesas, asignaciones, reglas] = await Promise.all([
     listarInvitados(boda.id),
     listarGrupos(boda.id),
     listarMesas(boda.id),
     listarAsignaciones(boda.id),
+    listarReglas(boda.id),
   ]);
 
   return (
@@ -35,6 +40,7 @@ export default async function PaginaMesas({ params }: Props) {
       grupos={grupos}
       mesasIniciales={mesas}
       asignacionesIniciales={asignaciones}
+      reglasIniciales={reglas}
     />
   );
 }

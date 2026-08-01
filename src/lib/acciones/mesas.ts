@@ -3,7 +3,7 @@
 import { obtenerBodaPorSlug } from "@/lib/datos/bodas";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { ajustarARejilla, encajarEnSala, type MesaNueva } from "@/lib/mesas";
-import type { Boda, FormaMesa, Mesa } from "@/lib/tipos";
+import type { Boda, FormaMesa, Mesa, Regla, TipoRegla } from "@/lib/tipos";
 
 const FORMAS: FormaMesa[] = ["redonda", "rectangular", "imperial"];
 
@@ -221,4 +221,82 @@ export async function levantar(
     .in("guest_id", invitados);
 
   if (error) throw new Error(`No se pudo levantar: ${error.message}`);
+}
+
+/** Fijar una mesa la deja fuera del reparto automático. */
+export async function fijarMesa(
+  slug: string,
+  mesaId: string,
+  fijada: boolean,
+): Promise<void> {
+  const boda = await resolverBoda(slug);
+
+  const { error } = await supabaseAdmin()
+    .from("event_tables")
+    .update({ is_locked: fijada })
+    .eq("id", mesaId)
+    .eq("wedding_id", boda.id);
+
+  if (error) throw new Error(`No se pudo fijar la mesa: ${error.message}`);
+}
+
+// ---------------------------------------------------------------- reglas
+
+export async function crearRegla(
+  slug: string,
+  kind: TipoRegla,
+  guestA: string,
+  guestB: string,
+): Promise<Regla | null> {
+  const boda = await resolverBoda(slug);
+  if (guestA === guestB) return null;
+
+  const db = supabaseAdmin();
+  const { data: suyos } = await db
+    .from("guests")
+    .select("id")
+    .eq("wedding_id", boda.id)
+    .in("id", [guestA, guestB]);
+
+  if ((suyos ?? []).length !== 2) throw new Error("Invitados no válidos");
+
+  // El índice único es sobre una expresión, así que PostgREST no puede usarlo
+  // como destino de upsert: se busca la pareja a mano en los dos órdenes.
+  const { data: existente } = await db
+    .from("seating_rules")
+    .select("id")
+    .eq("wedding_id", boda.id)
+    .or(
+      `and(guest_a.eq.${guestA},guest_b.eq.${guestB}),and(guest_a.eq.${guestB},guest_b.eq.${guestA})`,
+    )
+    .maybeSingle();
+
+  const consulta = existente
+    ? db.from("seating_rules").update({ kind }).eq("id", existente.id)
+    : db.from("seating_rules").insert({
+        wedding_id: boda.id,
+        kind,
+        guest_a: guestA,
+        guest_b: guestB,
+      });
+
+  const { data, error } = await consulta.select("*").maybeSingle();
+
+  if (error) throw new Error(`No se pudo crear la regla: ${error.message}`);
+  return (data as Regla | null) ?? null;
+}
+
+export async function borrarRegla(
+  slug: string,
+  reglaId: string,
+): Promise<void> {
+  const boda = await resolverBoda(slug);
+
+  const { error } = await supabaseAdmin()
+    .from("seating_rules")
+    .delete()
+    .eq("id", reglaId)
+    .eq("wedding_id", boda.id);
+
+  if (error) throw new Error(`No se pudo borrar la regla: ${error.message}`);
 }

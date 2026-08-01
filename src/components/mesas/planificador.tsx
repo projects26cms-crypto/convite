@@ -20,20 +20,24 @@ import {
   useTransition,
 } from "react";
 
-import { BarraHerramientas } from "@/components/mesas/barra";
+import { BarraHerramientas, type Alcance } from "@/components/mesas/barra";
 import { Inspector } from "@/components/mesas/inspector";
 import { PanelSinSentar } from "@/components/mesas/panel";
 import { CaraChip, MesaEnLienzo } from "@/components/mesas/piezas";
+import { Button } from "@/components/ui/button";
 import {
   actualizarMesa,
   borrarMesa,
+  borrarRegla,
   borrarTodasLasMesas,
   crearMesas,
+  crearRegla,
+  fijarMesa,
   levantar,
   moverMesa,
   sentarEnBloque,
 } from "@/lib/acciones/mesas";
-import { repartir } from "@/lib/autosentar";
+import { conflictos, repartir, type Par } from "@/lib/autosentar";
 import {
   CAPACIDAD_POR_DEFECTO,
   PLANTILLAS,
@@ -46,7 +50,14 @@ import {
   type MesaNueva,
   type NivelSeparacion,
 } from "@/lib/mesas";
-import type { Asignacion, GrupoInvitados, Invitado, Mesa } from "@/lib/tipos";
+import type {
+  Asignacion,
+  GrupoInvitados,
+  Invitado,
+  Mesa,
+  Regla,
+  TipoRegla,
+} from "@/lib/tipos";
 
 const MAX_DESHACER = 50;
 const ESCALA_MIN = 0.12;
@@ -61,12 +72,14 @@ export function Planificador({
   grupos,
   mesasIniciales,
   asignacionesIniciales,
+  reglasIniciales,
 }: {
   slug: string;
   invitados: Invitado[];
   grupos: GrupoInvitados[];
   mesasIniciales: Mesa[];
   asignacionesIniciales: Asignacion[];
+  reglasIniciales: Regla[];
 }) {
   const [mesas, setMesas] = useState<Mesa[]>(mesasIniciales);
   const [asientos, setAsientos] = useState<Record<string, string>>(() =>
@@ -74,6 +87,13 @@ export function Planificador({
       asignacionesIniciales.map((a) => [a.guest_id, a.table_id]),
     ),
   );
+
+  const [reglas, setReglas] = useState<Regla[]>(reglasIniciales);
+  const [propuesta, setPropuesta] = useState<{
+    pares: Par[];
+    resumen: string;
+  } | null>(null);
+  const [alcance, setAlcance] = useState<Alcance>("todos");
 
   const [pendientes, setPendientes] = useState(0);
   const [fallo, setFallo] = useState<string | null>(null);
@@ -166,6 +186,16 @@ export function Planificador({
   );
 
   const presidencial = mesas.find((m) => m.is_head) ?? null;
+
+  const roto = useMemo(() => conflictos(asientos, reglas), [asientos, reglas]);
+
+  const fantasmas = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const par of propuesta?.pares ?? []) {
+      mapa.set(par.mesaId, (mapa.get(par.mesaId) ?? 0) + 1);
+    }
+    return mapa;
+  }, [propuesta]);
 
   // -------------------------------------------------------------- selección
 
@@ -572,23 +602,46 @@ export function Planificador({
     });
   }
 
-  function sentarPorFamilias() {
+  /** No sienta a nadie: propone y espera confirmación. */
+  function proponerReparto() {
     const { pares, sinSitio, partidos } = repartir({
       invitados,
       grupos,
       mesas,
       asientos,
+      reglas,
       porBando,
+      soloIds: alcance === "marcados" ? seleccion : undefined,
+      soloMesaId: alcance === "mesa" ? seleccionada : undefined,
     });
 
     if (pares.length === 0) {
+      setPropuesta(null);
       setNota(
-        mesas.filter((m) => !m.is_head).length === 0
-          ? "Primero monta las mesas."
-          : "No queda nadie por sentar o no hay sitio libre.",
+        mesas.filter((m) => !m.is_head && !m.is_locked).length === 0
+          ? "No hay mesas libres donde repartir. Monta la sala o suelta alguna mesa fijada."
+          : "No queda nadie por sentar con ese alcance, o no hay sitio libre.",
       );
       return;
     }
+
+    setNota(null);
+    setPropuesta({
+      pares,
+      resumen: [
+        `Se sentarían ${pares.length}.`,
+        sinSitio > 0 && `${sinSitio} se quedan fuera: faltan plazas.`,
+        partidos > 0 &&
+          `${partidos} ${partidos === 1 ? "grupo no cabe entero" : "grupos no caben enteros"}: con una mesa más caben juntos.`,
+      ]
+        .filter(Boolean)
+        .join(" "),
+    });
+  }
+
+  function aplicarPropuesta() {
+    if (!propuesta) return;
+    const { pares } = propuesta;
 
     setAsientos((previos) => {
       const copia = { ...previos };
@@ -610,16 +663,37 @@ export function Planificador({
       },
     });
 
-    setNota(
-      [
-        `${pares.length} sentados por familias.`,
-        sinSitio > 0 && `${sinSitio} se quedan fuera: faltan plazas.`,
-        partidos > 0 &&
-          `${partidos} ${partidos === 1 ? "grupo no cabía entero" : "grupos no cabían enteros"}: con una mesa más caben juntos.`,
-      ]
-        .filter(Boolean)
-        .join(" "),
+    setPropuesta(null);
+    setSeleccion(new Set());
+    setNota(`${pares.length} sentados por familias.`);
+  }
+
+  function vaciarMesa(mesa: Mesa) {
+    const ids = (sentadosPorMesa.get(mesa.id) ?? []).map((i) => i.id);
+    levantarA(ids);
+  }
+
+  function alternarFijada(mesa: Mesa, fijada: boolean) {
+    setMesas((previas) =>
+      previas.map((m) => (m.id === mesa.id ? { ...m, is_locked: fijada } : m)),
     );
+    guardar(() => fijarMesa(slug, mesa.id, fijada));
+  }
+
+  function anadirRegla(kind: TipoRegla, a: string, b: string) {
+    guardar(async () => {
+      const creada = await crearRegla(slug, kind, a, b);
+      if (!creada) return;
+      setReglas((previas) => [
+        ...previas.filter((r) => r.id !== creada.id),
+        creada,
+      ]);
+    });
+  }
+
+  function quitarRegla(reglaId: string) {
+    setReglas((previas) => previas.filter((r) => r.id !== reglaId));
+    guardar(() => borrarRegla(slug, reglaId));
   }
 
   // ------------------------------------------------------- lienzo: vista
@@ -886,10 +960,36 @@ export function Planificador({
             ultimoPaso={pila[pila.length - 1]?.etiqueta ?? null}
             onDeshacer={deshacer}
             onAnadir={anadirUna}
-            onSentarFamilias={sentarPorFamilias}
+            onSentarFamilias={proponerReparto}
             onPlantilla={aplicarPlantilla}
             onIrA={irA}
+            reglas={reglas}
+            incumplidas={roto.invitados}
+            onCrearRegla={anadirRegla}
+            onBorrarRegla={quitarRegla}
+            alcance={alcance}
+            setAlcance={setAlcance}
+            haySeleccion={seleccion.size > 0}
+            hayMesaElegida={seleccionada !== null}
           />
+
+          {propuesta && (
+            <div className="flex flex-wrap items-center gap-3 border-b border-border bg-accent px-4 py-2 text-sm text-accent-foreground">
+              <span>{propuesta.resumen} Míralo en el plano antes de aplicar.</span>
+              <span className="ml-auto flex items-center gap-2">
+                <Button size="sm" onClick={aplicarPropuesta}>
+                  Aplicar
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setPropuesta(null)}
+                  className="text-sm underline underline-offset-4"
+                >
+                  Descartar
+                </button>
+              </span>
+            </div>
+          )}
 
           {seleccion.size > 0 && (
             <p
@@ -944,6 +1044,9 @@ export function Planificador({
                   mostrarSillas={verSillas}
                   resaltada={mesasResaltadas.has(mesa.id)}
                   seleccionada={seleccionada === mesa.id}
+                  fijada={mesa.is_locked}
+                  conConflicto={roto.mesas.has(mesa.id)}
+                  fantasma={fantasmas.get(mesa.id)}
                   alPulsar={(e) => alPulsarMesa(mesa, e)}
                 />
               ))}
@@ -970,6 +1073,8 @@ export function Planificador({
               cambiarMesa(mesaSeleccionada.id, cambios, persistir)
             }
             onLevantar={(id) => levantarA([id])}
+            onVaciar={() => vaciarMesa(mesaSeleccionada)}
+            onFijar={(fijada) => alternarFijada(mesaSeleccionada, fijada)}
             onDuplicar={() => duplicar(mesaSeleccionada)}
             onBorrar={() => quitarMesa(mesaSeleccionada)}
             onCerrar={() => setSeleccionada(null)}

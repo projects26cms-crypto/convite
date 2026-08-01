@@ -45,6 +45,20 @@ export type Mesa = {
   rotation: number;
   /** La presidencial. Solo puede haber una por boda y no se puede borrar. */
   is_head: boolean;
+  /** Fijada: el reparto automático no la toca. */
+  is_locked: boolean;
+  created_at: string;
+};
+
+export type TipoRegla = "juntos" | "separados";
+
+/** Pareja de invitados que debe compartir mesa, o que no puede compartirla. */
+export type Regla = {
+  id: string;
+  wedding_id: string;
+  kind: TipoRegla;
+  guest_a: string;
+  guest_b: string;
   created_at: string;
 };
 
