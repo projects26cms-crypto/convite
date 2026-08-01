@@ -45,6 +45,7 @@ export default async function PaginaMesas({ params }: Props) {
         ancho: Number(boda.room_width),
         alto: Number(boda.room_height),
       }}
+      presetSala={boda.room_preset}
     />
   );
 }

@@ -352,6 +352,45 @@ export function modeloEquivalente(
 }
 
 // ---------------------------------------------------------------------------
+// Dibujo
+// ---------------------------------------------------------------------------
+
+export type Figura =
+  | { tipo: "circulo"; cx: number; cy: number; r: number }
+  | { tipo: "rect"; x: number; y: number; ancho: number; alto: number }
+  | { tipo: "camino"; d: string };
+
+/**
+ * Formas primitivas del tablero, en coordenadas locales. Las dibujan por igual
+ * el plano y la miniatura del selector.
+ */
+export function figurasDe(modelo: ModeloMesa, capacidad: number): Figura[] {
+  const contorno = modelo.contorno(capacidad);
+  const { ancho, alto } = modelo.medidas(capacidad);
+
+  if (contorno.tipo === "circulo") {
+    return [
+      { tipo: "circulo", cx: ancho / 2, cy: alto / 2, r: contorno.diametro / 2 },
+    ];
+  }
+
+  if (contorno.tipo === "media_luna") {
+    const r = contorno.diametro / 2;
+    return [
+      { tipo: "camino", d: `M 0 ${alto} A ${r} ${r} 0 0 1 ${ancho} ${alto} Z` },
+    ];
+  }
+
+  return contorno.piezas.map((pieza) => ({
+    tipo: "rect" as const,
+    x: pieza.x,
+    y: pieza.y,
+    ancho: pieza.ancho,
+    alto: pieza.alto,
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Sillas
 // ---------------------------------------------------------------------------
 

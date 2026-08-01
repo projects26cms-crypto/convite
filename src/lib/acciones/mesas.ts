@@ -3,13 +3,22 @@
 import { obtenerBodaPorSlug } from "@/lib/datos/bodas";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import {
+  SALA_MAX,
+  SALA_MIN,
   ajustarARejilla,
   encajarEnSala,
   type MesaNueva,
   type Sala,
 } from "@/lib/mesas";
 import { modeloPorId } from "@/lib/modelos";
-import type { Boda, FormaMesa, Mesa, Regla, TipoRegla } from "@/lib/tipos";
+import type {
+  Boda,
+  FormaMesa,
+  Mesa,
+  PresetSala,
+  Regla,
+  TipoRegla,
+} from "@/lib/tipos";
 
 const FORMAS: FormaMesa[] = [
   "redonda",
@@ -254,6 +263,31 @@ export async function levantar(
     .in("guest_id", invitados);
 
   if (error) throw new Error(`No se pudo levantar: ${error.message}`);
+}
+
+/** Medidas de la sala. No mueve ni borra mesas: solo cambia el perímetro. */
+export async function actualizarSala(
+  slug: string,
+  ancho: number,
+  alto: number,
+  preset: PresetSala,
+): Promise<void> {
+  const boda = await resolverBoda(slug);
+  const acotar = (valor: number) =>
+    Math.min(SALA_MAX, Math.max(SALA_MIN, Math.round(valor)));
+
+  const { error } = await supabaseAdmin()
+    .from("weddings")
+    .update({
+      room_width: acotar(ancho),
+      room_height: acotar(alto),
+      room_preset: ["S", "M", "L", "custom"].includes(preset)
+        ? preset
+        : "custom",
+    })
+    .eq("id", boda.id);
+
+  if (error) throw new Error(`No se pudo guardar la sala: ${error.message}`);
 }
 
 /** Fijar una mesa la deja fuera del reparto automático. */

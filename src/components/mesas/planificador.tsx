@@ -23,10 +23,12 @@ import {
 import { BarraHerramientas, type Alcance } from "@/components/mesas/barra";
 import { Inspector } from "@/components/mesas/inspector";
 import { PanelSinSentar } from "@/components/mesas/panel";
+import { MiniaturaModelo } from "@/components/mesas/figura";
 import { CaraChip, MesaEnLienzo } from "@/components/mesas/piezas";
 import { Button } from "@/components/ui/button";
 import {
   actualizarMesa,
+  actualizarSala,
   borrarMesa,
   borrarRegla,
   borrarTodasLasMesas,
@@ -43,18 +45,24 @@ import {
   PLANTILLAS,
   PRESIDENCIAL_POR_DEFECTO,
   SEPARACIONES,
+  SALA_MAX,
+  SALA_MIN,
   buscarHueco,
   distribuirSinSolapes,
+  encajarEnSala,
+  fueraDeSala,
   resolverPosicion,
   type MesaNueva,
   type NivelSeparacion,
   type Sala,
 } from "@/lib/mesas";
+import type { ModeloMesa } from "@/lib/modelos";
 import type {
   Asignacion,
   GrupoInvitados,
   Invitado,
   Mesa,
+  PresetSala,
   Regla,
   TipoRegla,
 } from "@/lib/tipos";
@@ -73,7 +81,8 @@ export function Planificador({
   mesasIniciales,
   asignacionesIniciales,
   reglasIniciales,
-  sala,
+  sala: salaInicial,
+  presetSala: presetInicial,
 }: {
   slug: string;
   invitados: Invitado[];
@@ -82,7 +91,16 @@ export function Planificador({
   asignacionesIniciales: Asignacion[];
   reglasIniciales: Regla[];
   sala: Sala;
+  presetSala: PresetSala;
 }) {
+  const [sala, setSala] = useState<Sala>(salaInicial);
+  const [presetSala, setPresetSala] = useState<PresetSala>(presetInicial);
+  const [modeloElegido, setModeloElegido] = useState<ModeloMesa | null>(null);
+  const [fantasmaMesa, setFantasmaMesa] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+
   const [mesas, setMesas] = useState<Mesa[]>(mesasIniciales);
   const [asientos, setAsientos] = useState<Record<string, string>>(() =>
     Object.fromEntries(
@@ -790,6 +808,132 @@ export function Planificador({
     }
   }
 
+  /** Coordenadas de pantalla a centímetros de sala. */
+  const aPlano = useCallback(
+    (clientX: number, clientY: number) => {
+      const caja = contenedor.current?.getBoundingClientRect();
+      if (!caja) return null;
+      return {
+        x: (clientX - caja.left - vista.x) / vista.escala,
+        y: (clientY - caja.top - vista.y) / vista.escala,
+      };
+    },
+    [vista],
+  );
+
+  const mesasFuera = useMemo(
+    () => mesas.filter((m) => fueraDeSala(m, sala)),
+    [mesas, sala],
+  );
+
+  function cambiarSala(ancho: number, alto: number, preset: string) {
+    const nueva = {
+      ancho: Math.min(SALA_MAX, Math.max(SALA_MIN, Math.round(ancho))),
+      alto: Math.min(SALA_MAX, Math.max(SALA_MIN, Math.round(alto))),
+    };
+    setSala(nueva);
+    setPresetSala(preset as PresetSala);
+    guardar(() =>
+      actualizarSala(slug, nueva.ancho, nueva.alto, preset as PresetSala),
+    );
+  }
+
+  /** Mete dentro las que se quedaron fuera. Solo cuando lo pides tú. */
+  function reubicarDentro() {
+    const fuera = mesas.filter((m) => fueraDeSala(m, sala));
+    if (fuera.length === 0) return;
+
+    const movidas: { id: string; x: number; y: number }[] = [];
+    const trabajo = [...mesas];
+
+    for (const mesa of fuera) {
+      const otras = trabajo.filter((m) => m.id !== mesa.id);
+      const dentro = encajarEnSala(
+        mesa,
+        mesa.rotation,
+        Math.min(Math.max(mesa.pos_x, 0), sala.ancho),
+        Math.min(Math.max(mesa.pos_y, 0), sala.alto),
+        sala,
+      );
+      const destino =
+        resolverPosicion(mesa, dentro.x, dentro.y, otras, separacion, sala) ??
+        buscarHueco(mesa, dentro.x, dentro.y, otras, separacion, sala);
+      if (!destino) continue;
+
+      movidas.push({ id: mesa.id, x: destino.x, y: destino.y });
+      const i = trabajo.findIndex((m) => m.id === mesa.id);
+      trabajo[i] = { ...mesa, pos_x: destino.x, pos_y: destino.y };
+    }
+
+    if (movidas.length === 0) {
+      setNota("No hay hueco dentro de la sala. Hazla más grande o quita mesas.");
+      return;
+    }
+
+    const antes = new Map(mesas.map((m) => [m.id, { x: m.pos_x, y: m.pos_y }]));
+    setMesas(trabajo);
+    guardar(async () => {
+      for (const m of movidas) await moverMesa(slug, m.id, m.x, m.y);
+    });
+    registrar({
+      etiqueta: `Reubicar ${movidas.length} mesas`,
+      deshacer: () => {
+        setMesas((previas) =>
+          previas.map((m) => {
+            const p = antes.get(m.id);
+            return p ? { ...m, pos_x: p.x, pos_y: p.y } : m;
+          }),
+        );
+        guardar(async () => {
+          for (const m of movidas) {
+            const p = antes.get(m.id);
+            if (p) await moverMesa(slug, m.id, p.x, p.y);
+          }
+        });
+      },
+    });
+    setNota(
+      `${movidas.length} ${movidas.length === 1 ? "mesa reubicada" : "mesas reubicadas"} dentro de la sala.`,
+    );
+  }
+
+  /** Coloca el modelo elegido donde has pulsado. */
+  function colocarModelo(clientX: number, clientY: number) {
+    if (!modeloElegido) return;
+    const punto = aPlano(clientX, clientY);
+    if (!punto) return;
+
+    const plantilla = {
+      shape: modeloElegido.shape,
+      capacity: modeloElegido.capacidad,
+      template_id: modeloElegido.id,
+      rotation: 0,
+    };
+    const destino =
+      resolverPosicion(plantilla, punto.x, punto.y, mesas, separacion, sala) ??
+      buscarHueco(plantilla, punto.x, punto.y, mesas, separacion, sala);
+
+    if (!destino) {
+      setNota("Ahí no cabe. Prueba en otro sitio o baja la separación.");
+      return;
+    }
+
+    anadirMesas(
+      [
+        {
+          ...plantilla,
+          name: `Mesa ${mesas.filter((m) => !m.is_head).length + 1}`,
+          pos_x: destino.x,
+          pos_y: destino.y,
+        },
+      ],
+      `Añadir ${modeloElegido.nombre}`,
+    );
+    setModeloElegido(null);
+    setFantasmaMesa(null);
+    setNota(null);
+  }
+
   const irA = useCallback(
     (invitadoId: string, mesaId: string | null) => {
       setSeleccion(new Set([invitadoId]));
@@ -983,7 +1127,39 @@ export function Planificador({
             setAlcance={setAlcance}
             haySeleccion={seleccion.size > 0}
             hayMesaElegida={seleccionada !== null}
+            modeloElegido={modeloElegido?.id ?? null}
+            onElegirModelo={(modelo) => {
+              setModeloElegido(modelo);
+              setFantasmaMesa(null);
+            }}
+            sala={sala}
+            presetSala={presetSala}
+            onCambiarSala={cambiarSala}
           />
+
+          {modeloElegido && (
+            <p
+              role="status"
+              className="border-b border-border bg-foreground px-4 py-2 text-sm text-background"
+            >
+              Pulsa en el plano para colocar {modeloElegido.nombre}.
+            </p>
+          )}
+
+          {mesasFuera.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 border-b border-border bg-destructive/10 px-4 py-2 text-sm">
+              <span className="text-destructive">
+                {mesasFuera.length}{" "}
+                {mesasFuera.length === 1
+                  ? "mesa se queda fuera de la sala"
+                  : "mesas se quedan fuera de la sala"}
+                . No he movido ni borrado nada.
+              </span>
+              <Button size="sm" variant="secondary" onClick={reubicarDentro}>
+                Reubicar dentro
+              </Button>
+            </div>
+          )}
 
           {propuesta && (
             <div className="flex flex-wrap items-center gap-3 border-b border-border bg-accent px-4 py-2 text-sm text-accent-foreground">
@@ -1026,8 +1202,20 @@ export function Planificador({
           <div
             ref={contenedor}
             onPointerDown={empezarPaneo}
-            onPointerMove={moverPaneo}
-            onPointerUp={terminarPaneo}
+            onPointerMove={(e) => {
+              moverPaneo(e);
+              if (!modeloElegido) return;
+              const punto = aPlano(e.clientX, e.clientY);
+              if (punto) setFantasmaMesa(punto);
+            }}
+            onPointerLeave={() => setFantasmaMesa(null)}
+            onPointerUp={(e) => {
+              if (modeloElegido) {
+                colocarModelo(e.clientX, e.clientY);
+                return;
+              }
+              terminarPaneo(e);
+            }}
             onPointerCancel={terminarPaneo}
             className="relative flex-1 touch-none overflow-hidden bg-canvas"
           >
@@ -1044,6 +1232,32 @@ export function Planificador({
               }}
               className="absolute left-0 top-0 border border-canvas-line bg-card/40"
             >
+              <div
+                aria-hidden
+                data-fondo="1"
+                style={{ width: sala.ancho, height: sala.alto }}
+                className="absolute left-0 top-0 border-2 border-foreground/25"
+              />
+
+              {modeloElegido && fantasmaMesa && (
+                <div
+                  aria-hidden
+                  style={{
+                    left:
+                      fantasmaMesa.x -
+                      modeloElegido.medidas(modeloElegido.capacidad).ancho / 2,
+                    top:
+                      fantasmaMesa.y -
+                      modeloElegido.medidas(modeloElegido.capacidad).alto / 2,
+                    width: modeloElegido.medidas(modeloElegido.capacidad).ancho,
+                    height: modeloElegido.medidas(modeloElegido.capacidad).alto,
+                  }}
+                  className="pointer-events-none absolute z-40 opacity-60"
+                >
+                  <MiniaturaModelo modelo={modeloElegido} />
+                </div>
+              )}
+
               {mesas.map((mesa) => (
                 <MesaEnLienzo
                   key={mesa.id}
@@ -1057,6 +1271,7 @@ export function Planificador({
                   resaltada={mesasResaltadas.has(mesa.id)}
                   seleccionada={seleccionada === mesa.id}
                   fijada={mesa.is_locked}
+                  fuera={mesasFuera.some((m) => m.id === mesa.id)}
                   conConflicto={roto.mesas.has(mesa.id)}
                   fantasma={fantasmas.get(mesa.id)}
                   alPulsar={(e) => alPulsarMesa(mesa, e)}

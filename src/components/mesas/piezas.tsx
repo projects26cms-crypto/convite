@@ -2,13 +2,9 @@
 
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 
-import { esCircular, tamanoMesa } from "@/lib/mesas";
-import {
-  SILLA_RADIO,
-  modeloEquivalente,
-  modeloPorId,
-  sillasDe,
-} from "@/lib/modelos";
+import { tamanoMesa } from "@/lib/mesas";
+import { FiguraMesa, SillasFigura } from "@/components/mesas/figura";
+import { modeloEquivalente, modeloPorId } from "@/lib/modelos";
 import type { Bando, GrupoInvitados, Invitado, Mesa } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
 
@@ -114,60 +110,6 @@ export function ChipInvitado({
   );
 }
 
-/**
- * Sillas alrededor de la mesa, en centímetros de sala.
- *
- * Las posiciones salen del catálogo, que es la misma función que alimenta las
- * miniaturas del selector: si cambia el reparto de sillas, cambian las dos.
- */
-function Sillas({
-  mesa,
-  ocupadas,
-}: {
-  mesa: Pick<Mesa, "shape" | "capacity" | "is_head"> & {
-    template_id?: string | null;
-  };
-  ocupadas: number;
-}) {
-  const { ancho, alto } = tamanoMesa(mesa);
-  const modelo =
-    modeloPorId(mesa.template_id) ??
-    modeloEquivalente(mesa.shape, mesa.capacity, mesa.is_head);
-
-  const caja = modelo.medidas(mesa.capacity);
-  const kx = caja.ancho === 0 ? 1 : ancho / caja.ancho;
-  const ky = caja.alto === 0 ? 1 : alto / caja.alto;
-  const radio = SILLA_RADIO;
-
-  const puntos = sillasDe(modelo, mesa.capacity).map((silla) => ({
-    x: silla.x * kx,
-    y: silla.y * ky,
-  }));
-
-  return (
-    <>
-      {puntos.map((punto, i) => (
-        <span
-          key={i}
-          aria-hidden
-          style={{
-            left: punto.x - radio,
-            top: punto.y - radio,
-            width: radio * 2,
-            height: radio * 2,
-          }}
-          className={cn(
-            "pointer-events-none absolute rounded-full border",
-            i < ocupadas
-              ? "border-foreground/60 bg-foreground/60"
-              : "border-foreground/30 bg-card",
-          )}
-        />
-      ))}
-    </>
-  );
-}
-
 const CHIPS_VISIBLES: Record<string, number> = {
   redonda: 6,
   rectangular: 3,
@@ -185,6 +127,7 @@ export function MesaEnLienzo({
   resaltada,
   seleccionada,
   fijada,
+  fuera,
   conConflicto,
   fantasma,
   alPulsar,
@@ -199,13 +142,16 @@ export function MesaEnLienzo({
   resaltada: boolean;
   seleccionada: boolean;
   fijada?: boolean;
+  fuera?: boolean;
   conConflicto?: boolean;
   fantasma?: number;
   alPulsar: (e: React.MouseEvent) => void;
 }) {
   const { ancho, alto } = tamanoMesa(mesa);
   const pasada = sentados.length > mesa.capacity;
-  const redonda = esCircular(mesa.shape);
+  const modelo =
+    modeloPorId(mesa.template_id) ??
+    modeloEquivalente(mesa.shape, mesa.capacity, mesa.is_head);
 
   const {
     attributes,
@@ -241,37 +187,62 @@ export function MesaEnLienzo({
       }}
       className={cn("absolute", isDragging && "cursor-grabbing")}
     >
-      {/* Zona de sillas y paso: dos halos que se tocan son la separación mínima. */}
-      {mostrarHalo && (
-        <div
-          aria-hidden
-          style={{ inset: -halo }}
-          className={cn(
-            "pointer-events-none absolute border border-dashed border-foreground/25 bg-foreground/[0.04]",
-            redonda ? "rounded-full" : "rounded-xl",
-          )}
-        />
-      )}
-
-      {mostrarSillas && <Sillas mesa={mesa} ocupadas={sentados.length} />}
-
       <div
         ref={anclarSoltar}
         onClick={alPulsar}
-        className={cn(
-          "relative flex h-full w-full flex-col items-center overflow-hidden p-2",
-          redonda ? "rounded-full" : "rounded-lg",
-          mesa.is_head
-            ? "border-[3px] border-foreground bg-accent"
-            : "border-2 border-foreground/70 bg-card",
-          resaltada && "border-novia ring-4 ring-novia/25",
-          isOver && "border-foreground ring-4 ring-foreground/25",
-          seleccionada && "ring-2 ring-foreground/40",
-          (pasada || conConflicto) && "border-destructive",
-          fijada && "border-dashed",
-          isDragging && "shadow-2xl",
-        )}
+        className="relative h-full w-full"
       >
+        <svg
+          viewBox={`0 0 ${ancho} ${alto}`}
+          width={ancho}
+          height={alto}
+          className="absolute inset-0 overflow-visible"
+          aria-hidden
+        >
+          {/* Zona de sillas y paso: dos halos que se tocan son la separación mínima. */}
+          {mostrarHalo && (
+            <FiguraMesa
+              modelo={modelo}
+              capacidad={mesa.capacity}
+              grosor={halo * 2}
+              className="fill-none stroke-foreground/10"
+            />
+          )}
+          {(resaltada || isOver) && (
+            <FiguraMesa
+              modelo={modelo}
+              capacidad={mesa.capacity}
+              grosor={44}
+              className={cn(
+                "fill-none",
+                isOver ? "stroke-foreground/25" : "stroke-novia/30",
+              )}
+            />
+          )}
+          {mostrarSillas && (
+            <SillasFigura
+              modelo={modelo}
+              capacidad={mesa.capacity}
+              ocupadas={sentados.length}
+            />
+          )}
+          <FiguraMesa
+            modelo={modelo}
+            capacidad={mesa.capacity}
+            grosor={mesa.is_head ? 10 : 6}
+            strokeDasharray={fijada ? "26 18" : undefined}
+            className={cn(
+              mesa.is_head ? "fill-accent" : "fill-card",
+              "stroke-foreground/70",
+              resaltada && "stroke-novia",
+              isOver && "stroke-foreground",
+              seleccionada && "stroke-foreground",
+              (pasada || conConflicto || fuera) && "stroke-destructive",
+            )}
+          />
+        </svg>
+
+        <div className="relative flex h-full w-full flex-col items-center overflow-hidden p-2">
         <button
           type="button"
           {...listeners}
@@ -318,6 +289,7 @@ export function MesaEnLienzo({
               +{ocultos} más
             </span>
           )}
+          </div>
         </div>
       </div>
     </div>

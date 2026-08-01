@@ -3,6 +3,9 @@
 import { useMemo, useState } from "react";
 
 import { PanelReglas } from "@/components/mesas/reglas";
+import { SelectorModelos } from "@/components/mesas/selector-modelos";
+import { PRESETS_SALA, SALA_MAX, SALA_MIN, type Sala } from "@/lib/mesas";
+import type { ModeloMesa } from "@/lib/modelos";
 import { Button } from "@/components/ui/button";
 import {
   CAPACIDAD_POR_DEFECTO,
@@ -132,6 +135,11 @@ export function BarraHerramientas({
   setAlcance,
   haySeleccion,
   hayMesaElegida,
+  modeloElegido,
+  onElegirModelo,
+  sala,
+  presetSala,
+  onCambiarSala,
 }: {
   mesas: number;
   todasLasMesas: Mesa[];
@@ -170,9 +178,14 @@ export function BarraHerramientas({
   setAlcance: (v: Alcance) => void;
   haySeleccion: boolean;
   hayMesaElegida: boolean;
+  modeloElegido: string | null;
+  onElegirModelo: (modelo: ModeloMesa | null) => void;
+  sala: Sala;
+  presetSala: string;
+  onCambiarSala: (ancho: number, alto: number, preset: string) => void;
 }) {
   const [panel, setPanel] = useState<
-    "plantillas" | "sala" | "reglas" | null
+    "plantillas" | "sala" | "reglas" | "modelos" | null
   >(null);
   const [capacidad, setCapacidad] = useState(CAPACIDAD_POR_DEFECTO);
   const [enPresidencial, setEnPresidencial] = useState(
@@ -182,7 +195,7 @@ export function BarraHerramientas({
   const [cuantas, setCuantas] = useState(sugeridas);
   const [confirmando, setConfirmando] = useState<string | null>(null);
 
-  const alterna = (cual: "plantillas" | "sala" | "reglas") =>
+  const alterna = (cual: "plantillas" | "sala" | "reglas" | "modelos") =>
     setPanel((previo) => (previo === cual ? null : cual));
 
   const sinCumplir = reglas.filter(
@@ -194,6 +207,14 @@ export function BarraHerramientas({
       <div className="flex flex-wrap items-center gap-2 px-4 py-2">
         <Button size="sm" onClick={onAnadir}>
           {hayPresidencial ? "Añadir mesa" : "Crear presidencial"}
+        </Button>
+        <Button
+          size="sm"
+          variant={panel === "modelos" ? "default" : "secondary"}
+          onClick={() => alterna("modelos")}
+          aria-expanded={panel === "modelos"}
+        >
+          Modelos
         </Button>
         <Button
           size="sm"
@@ -296,6 +317,10 @@ export function BarraHerramientas({
         </div>
       </div>
 
+      {panel === "modelos" && (
+        <SelectorModelos elegido={modeloElegido} onElegir={onElegirModelo} />
+      )}
+
       {panel === "reglas" && (
         <PanelReglas
           invitados={invitados}
@@ -310,6 +335,63 @@ export function BarraHerramientas({
 
       {panel === "sala" && (
         <div className="flex flex-wrap items-end gap-5 border-t border-border bg-card px-4 py-3">
+          <div className="text-sm">
+            <span className="block text-muted-foreground">Tamaño de la sala</span>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <span className="flex overflow-hidden rounded-md border border-input">
+                {(
+                  Object.entries(PRESETS_SALA) as [
+                    keyof typeof PRESETS_SALA,
+                    (typeof PRESETS_SALA)[keyof typeof PRESETS_SALA],
+                  ][]
+                ).map(([clave, valor]) => (
+                  <button
+                    key={clave}
+                    type="button"
+                    onClick={() => onCambiarSala(valor.ancho, valor.alto, clave)}
+                    aria-pressed={presetSala === clave}
+                    title={valor.etiqueta}
+                    className={cn(
+                      "px-2.5 py-1.5 text-xs",
+                      presetSala === clave
+                        ? "bg-secondary font-medium"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {clave}
+                  </button>
+                ))}
+              </span>
+
+              <input
+                type="number"
+                min={SALA_MIN / 100}
+                max={SALA_MAX / 100}
+                step={0.5}
+                value={sala.ancho / 100}
+                aria-label="Ancho de la sala en metros"
+                onChange={(e) =>
+                  onCambiarSala(Number(e.target.value) * 100, sala.alto, "custom")
+                }
+                className="h-9 w-20 rounded-md border border-input bg-card px-2 text-sm tabular-nums"
+              />
+              <span className="text-muted-foreground">×</span>
+              <input
+                type="number"
+                min={SALA_MIN / 100}
+                max={SALA_MAX / 100}
+                step={0.5}
+                value={sala.alto / 100}
+                aria-label="Largo de la sala en metros"
+                onChange={(e) =>
+                  onCambiarSala(sala.ancho, Number(e.target.value) * 100, "custom")
+                }
+                className="h-9 w-20 rounded-md border border-input bg-card px-2 text-sm tabular-nums"
+              />
+              <span className="text-sm text-muted-foreground">m</span>
+            </div>
+          </div>
+
           <label className="text-sm">
             <span className="block text-muted-foreground">
               Separación entre mesas
