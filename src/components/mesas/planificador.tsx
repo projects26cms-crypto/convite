@@ -6,16 +6,24 @@ import {
   KeyboardSensor,
   PointerSensor,
   pointerWithin,
-  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 
-import { Button } from "@/components/ui/button";
-import { CaraChip, ChipInvitado, MesaEnLienzo } from "@/components/mesas/piezas";
+import { BarraHerramientas } from "@/components/mesas/barra";
+import { Inspector } from "@/components/mesas/inspector";
+import { PanelSinSentar } from "@/components/mesas/panel";
+import { CaraChip, MesaEnLienzo } from "@/components/mesas/piezas";
 import {
   actualizarMesa,
   borrarMesa,
@@ -28,7 +36,6 @@ import {
 import { repartir } from "@/lib/autosentar";
 import {
   CAPACIDAD_POR_DEFECTO,
-  FORMATOS_PRESIDENCIAL,
   PLANTILLAS,
   PRESIDENCIAL_POR_DEFECTO,
   SALA,
@@ -36,30 +43,17 @@ import {
   buscarHueco,
   distribuirSinSolapes,
   resolverPosicion,
-  sugerirMesas,
   type MesaNueva,
   type NivelSeparacion,
 } from "@/lib/mesas";
-import type {
-  Asignacion,
-  FormaMesa,
-  GrupoInvitados,
-  Invitado,
-  Mesa,
-} from "@/lib/tipos";
-import { cn } from "@/lib/utils";
+import type { Asignacion, GrupoInvitados, Invitado, Mesa } from "@/lib/tipos";
 
-const ESCALAS = [0.3, 0.45, 0.6] as const;
 const MAX_DESHACER = 50;
-
-function normalizar(valor: string): string {
-  return valor
-    .normalize("NFD")
-    .replace(new RegExp("[\\u0300-\\u036f]", "g"), "")
-    .toLocaleLowerCase("es-ES");
-}
+const ESCALA_MIN = 0.12;
+const ESCALA_MAX = 1.4;
 
 type Paso = { etiqueta: string; deshacer: () => void };
+type Vista = { x: number; y: number; escala: number };
 
 export function Planificador({
   slug,
@@ -87,16 +81,22 @@ export function Planificador({
   const [, iniciar] = useTransition();
 
   const [pila, setPila] = useState<Paso[]>([]);
-  const [busqueda, setBusqueda] = useState("");
-  const [grupoFiltro, setGrupoFiltro] = useState("");
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
+  const [ultimoMarcado, setUltimoMarcado] = useState<string | null>(null);
   const [verRechazados, setVerRechazados] = useState(false);
-  const [escala, setEscala] = useState<number>(0.45);
+  const [verSillas, setVerSillas] = useState(true);
+  const [vista, setVista] = useState<Vista>({ x: 40, y: 40, escala: 0.45 });
   const [nivel, setNivel] = useState<NivelSeparacion>("holgado");
   const [porBando, setPorBando] = useState(false);
   const [seleccionada, setSeleccionada] = useState<string | null>(null);
-  const [arrastrado, setArrastrado] = useState<Invitado | null>(null);
+  const [arrastrado, setArrastrado] = useState<Invitado[] | null>(null);
   const [moviendoMesa, setMoviendoMesa] = useState(false);
   const [mesasResaltadas, setMesasResaltadas] = useState<Set<string>>(new Set());
+
+  const contenedor = useRef<HTMLDivElement>(null);
+  const paneo = useRef<{ x: number; y: number; vx: number; vy: number } | null>(
+    null,
+  );
 
   const separacion = SEPARACIONES[nivel].cm;
 
@@ -126,16 +126,7 @@ export function Planificador({
     });
   }, []);
 
-  useEffect(() => {
-    function alPulsar(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        deshacer();
-      }
-    }
-    window.addEventListener("keydown", alPulsar);
-    return () => window.removeEventListener("keydown", alPulsar);
-  }, [deshacer]);
+  // ------------------------------------------------------------------ datos
 
   const porId = useMemo(
     () => new Map(invitados.map((i) => [i.id, i])),
@@ -169,16 +160,6 @@ export function Planificador({
     [invitados, asientos],
   );
 
-  const visiblesEnPanel = useMemo(() => {
-    const aguja = normalizar(busqueda.trim());
-    return sinSentar.filter((invitado) => {
-      if (!verRechazados && invitado.rsvp_status === "rechazado") return false;
-      if (grupoFiltro && invitado.group_id !== grupoFiltro) return false;
-      if (!aguja) return true;
-      return normalizar(invitado.full_name).includes(aguja);
-    });
-  }, [sinSentar, busqueda, grupoFiltro, verRechazados]);
-
   const aSentar = useMemo(
     () => invitados.filter((i) => i.rsvp_status !== "rechazado").length,
     [invitados],
@@ -186,32 +167,97 @@ export function Planificador({
 
   const presidencial = mesas.find((m) => m.is_head) ?? null;
 
-  // ------------------------------------------------------- sentar y levantar
+  // -------------------------------------------------------------- selección
 
-  const sentarA = useCallback(
-    (invitadoId: string, mesaId: string, conDeshacer = true) => {
-      const anterior = asientos[invitadoId] ?? null;
-      if (anterior === mesaId) return;
+  const marcar = useCallback(
+    (ids: string[], e: React.MouseEvent, orden?: string[]) => {
+      const suma = e.ctrlKey || e.metaKey;
+      const rango = e.shiftKey && orden && ultimoMarcado && ids.length === 1;
 
-      setAsientos((previos) => ({ ...previos, [invitadoId]: mesaId }));
-      guardar(() => sentarEnBloque(slug, [{ invitadoId, mesaId }]));
-
-      if (!conDeshacer) return;
-      const nombre = porId.get(invitadoId)?.full_name ?? "el invitado";
-      registrar({
-        etiqueta: `Sentar a ${nombre}`,
-        deshacer: () => {
-          if (anterior) {
-            setAsientos((p) => ({ ...p, [invitadoId]: anterior }));
-            guardar(() => sentarEnBloque(slug, [{ invitadoId, mesaId: anterior }]));
-          } else {
-            setAsientos((p) => {
-              const copia = { ...p };
-              delete copia[invitadoId];
-              return copia;
-            });
-            guardar(() => levantar(slug, [invitadoId]));
+      setSeleccion((previa) => {
+        if (rango) {
+          const desde = orden.indexOf(ultimoMarcado);
+          const hasta = orden.indexOf(ids[0]);
+          if (desde >= 0 && hasta >= 0) {
+            const [a, b] = desde < hasta ? [desde, hasta] : [hasta, desde];
+            const copia = new Set(previa);
+            for (const id of orden.slice(a, b + 1)) copia.add(id);
+            return copia;
           }
+        }
+
+        if (!suma) {
+          const yaTodos = ids.every((id) => previa.has(id));
+          if (yaTodos && previa.size === ids.length) return new Set();
+          return new Set(ids);
+        }
+
+        const copia = new Set(previa);
+        const yaTodos = ids.every((id) => copia.has(id));
+        for (const id of ids) {
+          if (yaTodos) copia.delete(id);
+          else copia.add(id);
+        }
+        return copia;
+      });
+
+      setUltimoMarcado(ids[ids.length - 1] ?? null);
+    },
+    [ultimoMarcado],
+  );
+
+  // -------------------------------------------------------- sentar/levantar
+
+  const sentarVarios = useCallback(
+    (ids: string[], mesaId: string, etiqueta?: string) => {
+      const pares = ids
+        .filter((id) => asientos[id] !== mesaId)
+        .map((id) => ({ invitadoId: id, mesaId }));
+      if (pares.length === 0) return;
+
+      const antes = new Map(
+        pares.map((p) => [p.invitadoId, asientos[p.invitadoId] ?? null]),
+      );
+
+      setAsientos((previos) => {
+        const copia = { ...previos };
+        for (const par of pares) copia[par.invitadoId] = mesaId;
+        return copia;
+      });
+      guardar(() => sentarEnBloque(slug, pares));
+
+      const nombre =
+        etiqueta ??
+        (pares.length === 1
+          ? `Sentar a ${porId.get(pares[0].invitadoId)?.full_name ?? "alguien"}`
+          : `Sentar a ${pares.length}`);
+
+      registrar({
+        etiqueta: nombre,
+        deshacer: () => {
+          const vuelven = [...antes.entries()].filter(([, m]) => m !== null) as [
+            string,
+            string,
+          ][];
+          const seLevantan = [...antes.entries()]
+            .filter(([, m]) => m === null)
+            .map(([id]) => id);
+
+          setAsientos((previos) => {
+            const copia = { ...previos };
+            for (const [id, mesa] of vuelven) copia[id] = mesa;
+            for (const id of seLevantan) delete copia[id];
+            return copia;
+          });
+          guardar(async () => {
+            if (vuelven.length > 0) {
+              await sentarEnBloque(
+                slug,
+                vuelven.map(([id, mesa]) => ({ invitadoId: id, mesaId: mesa })),
+              );
+            }
+            if (seLevantan.length > 0) await levantar(slug, seLevantan);
+          });
         },
       });
     },
@@ -219,25 +265,31 @@ export function Planificador({
   );
 
   const levantarA = useCallback(
-    (invitadoId: string) => {
-      const anterior = asientos[invitadoId];
-      if (!anterior) return;
+    (ids: string[]) => {
+      const antes = ids
+        .filter((id) => asientos[id])
+        .map((id) => ({ invitadoId: id, mesaId: asientos[id] }));
+      if (antes.length === 0) return;
 
       setAsientos((previos) => {
         const copia = { ...previos };
-        delete copia[invitadoId];
+        for (const p of antes) delete copia[p.invitadoId];
         return copia;
       });
-      guardar(() => levantar(slug, [invitadoId]));
+      guardar(() => levantar(slug, antes.map((p) => p.invitadoId)));
 
-      const nombre = porId.get(invitadoId)?.full_name ?? "el invitado";
       registrar({
-        etiqueta: `Levantar a ${nombre}`,
+        etiqueta:
+          antes.length === 1
+            ? `Levantar a ${porId.get(antes[0].invitadoId)?.full_name ?? "alguien"}`
+            : `Levantar a ${antes.length}`,
         deshacer: () => {
-          setAsientos((p) => ({ ...p, [invitadoId]: anterior }));
-          guardar(() =>
-            sentarEnBloque(slug, [{ invitadoId, mesaId: anterior }]),
-          );
+          setAsientos((previos) => {
+            const copia = { ...previos };
+            for (const p of antes) copia[p.invitadoId] = p.mesaId;
+            return copia;
+          });
+          guardar(() => sentarEnBloque(slug, antes));
         },
       });
     },
@@ -247,13 +299,11 @@ export function Planificador({
   // ------------------------------------------------------------------ mesas
 
   const colocarMesa = useCallback(
-    (mesaId: string, x: number, y: number, conDeshacer = true) => {
+    (mesaId: string, x: number, y: number) => {
       const mesa = mesas.find((m) => m.id === mesaId);
       if (!mesa) return;
 
       const otras = mesas.filter((m) => m.id !== mesaId);
-      // Primero se intenta apartar de quien estorbe; si la zona está muy
-      // llena, se busca el hueco válido más cercano en espiral.
       const destino =
         resolverPosicion(mesa, x, y, otras, separacion) ??
         buscarHueco(mesa, x, y, otras, separacion);
@@ -273,7 +323,6 @@ export function Planificador({
       guardar(() => moverMesa(slug, mesaId, destino.x, destino.y));
       setNota(null);
 
-      if (!conDeshacer) return;
       registrar({
         etiqueta: `Mover ${mesa.name}`,
         deshacer: () => {
@@ -396,7 +445,7 @@ export function Planificador({
       setMesas(creadas);
       setAsientos({});
       setSeleccionada(null);
-      // Montar una sala entera no se deshace: se vuelve a montar.
+      setSeleccion(new Set());
       setPila([]);
       setNota(
         descartadas > 0
@@ -418,9 +467,8 @@ export function Planificador({
       };
 
       const siguiente = { ...mesa, ...cambios };
-
-      // Cambiar plazas, forma o giro cambia la huella: hay que recolocarla.
       let posicion = { x: siguiente.pos_x, y: siguiente.pos_y };
+
       if (
         cambios.shape !== undefined ||
         cambios.capacity !== undefined ||
@@ -524,8 +572,6 @@ export function Planificador({
     });
   }
 
-  // ------------------------------------------------------ reparto automático
-
   function sentarPorFamilias() {
     const { pares, sinSitio, partidos } = repartir({
       invitados,
@@ -564,15 +610,141 @@ export function Planificador({
       },
     });
 
-    const aviso = [
-      `${pares.length} sentados por familias.`,
-      sinSitio > 0 && `${sinSitio} se quedan fuera: faltan plazas.`,
-      partidos > 0 &&
-        `${partidos} ${partidos === 1 ? "grupo no cabía entero y se ha repartido" : "grupos no cabían enteros y se han repartido"}: con una mesa más caben juntos.`,
-    ].filter(Boolean);
-
-    setNota(aviso.join(" "));
+    setNota(
+      [
+        `${pares.length} sentados por familias.`,
+        sinSitio > 0 && `${sinSitio} se quedan fuera: faltan plazas.`,
+        partidos > 0 &&
+          `${partidos} ${partidos === 1 ? "grupo no cabía entero" : "grupos no cabían enteros"}: con una mesa más caben juntos.`,
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
   }
+
+  // ------------------------------------------------------- lienzo: vista
+
+  const ajustar = useCallback(() => {
+    const caja = contenedor.current?.getBoundingClientRect();
+    if (!caja) return;
+    const escala = Math.min(
+      (caja.width - 48) / SALA.ancho,
+      (caja.height - 48) / SALA.alto,
+    );
+    setVista({
+      escala,
+      x: (caja.width - SALA.ancho * escala) / 2,
+      y: (caja.height - SALA.alto * escala) / 2,
+    });
+  }, []);
+
+  useEffect(() => {
+    ajustar();
+  }, [ajustar]);
+
+  const ponerEscala = useCallback((nueva: number, cx?: number, cy?: number) => {
+    setVista((previa) => {
+      const escala = Math.min(ESCALA_MAX, Math.max(ESCALA_MIN, nueva));
+      const caja = contenedor.current?.getBoundingClientRect();
+      const px = cx ?? (caja ? caja.width / 2 : 0);
+      const py = cy ?? (caja ? caja.height / 2 : 0);
+      const factor = escala / previa.escala;
+      return {
+        escala,
+        x: px - (px - previa.x) * factor,
+        y: py - (py - previa.y) * factor,
+      };
+    });
+  }, []);
+
+  // La rueda necesita listener no pasivo para poder frenar el desplazamiento.
+  useEffect(() => {
+    const nodo = contenedor.current;
+    if (!nodo) return;
+
+    function alRodar(e: WheelEvent) {
+      e.preventDefault();
+      const caja = nodo!.getBoundingClientRect();
+      ponerEscala(
+        vista.escala * (e.deltaY < 0 ? 1.12 : 1 / 1.12),
+        e.clientX - caja.left,
+        e.clientY - caja.top,
+      );
+    }
+
+    nodo.addEventListener("wheel", alRodar, { passive: false });
+    return () => nodo.removeEventListener("wheel", alRodar);
+  }, [ponerEscala, vista.escala]);
+
+  function empezarPaneo(e: React.PointerEvent) {
+    if (e.target !== e.currentTarget && !(e.target as HTMLElement).dataset.fondo)
+      return;
+    paneo.current = { x: e.clientX, y: e.clientY, vx: vista.x, vy: vista.y };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function moverPaneo(e: React.PointerEvent) {
+    if (!paneo.current) return;
+    setVista((previa) => ({
+      ...previa,
+      x: paneo.current!.vx + (e.clientX - paneo.current!.x),
+      y: paneo.current!.vy + (e.clientY - paneo.current!.y),
+    }));
+  }
+
+  function terminarPaneo(e: React.PointerEvent) {
+    if (!paneo.current) return;
+    const movido =
+      Math.abs(e.clientX - paneo.current.x) +
+      Math.abs(e.clientY - paneo.current.y);
+    paneo.current = null;
+    if (movido < 4) {
+      setSeleccionada(null);
+      setSeleccion(new Set());
+    }
+  }
+
+  const irA = useCallback(
+    (invitadoId: string, mesaId: string | null) => {
+      setSeleccion(new Set([invitadoId]));
+      setUltimoMarcado(invitadoId);
+      if (!mesaId) return;
+
+      const mesa = mesas.find((m) => m.id === mesaId);
+      const caja = contenedor.current?.getBoundingClientRect();
+      if (!mesa || !caja) return;
+
+      setSeleccionada(mesaId);
+      setVista((previa) => ({
+        ...previa,
+        x: caja.width / 2 - mesa.pos_x * previa.escala,
+        y: caja.height / 2 - mesa.pos_y * previa.escala,
+      }));
+    },
+    [mesas],
+  );
+
+  // --------------------------------------------------------------- teclado
+
+  useEffect(() => {
+    function alPulsar(e: KeyboardEvent) {
+      const enCampo =
+        e.target instanceof HTMLElement &&
+        ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName);
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        deshacer();
+        return;
+      }
+      if (e.key === "Escape" && !enCampo) {
+        setSeleccion(new Set());
+        setSeleccionada(null);
+      }
+    }
+    window.addEventListener("keydown", alPulsar);
+    return () => window.removeEventListener("keydown", alPulsar);
+  }, [deshacer]);
 
   // --------------------------------------------------------------- arrastre
 
@@ -581,6 +753,20 @@ export function Planificador({
     useSensor(KeyboardSensor),
   );
 
+  function resaltarFamilia(ids: string[]) {
+    const familias = new Set(
+      ids.map((id) => porId.get(id)?.group_id).filter(Boolean),
+    );
+    if (familias.size === 0) return;
+
+    const conFamilia = new Set<string>();
+    for (const [otroId, mesaId] of Object.entries(asientos)) {
+      const grupo = porId.get(otroId)?.group_id;
+      if (grupo && familias.has(grupo)) conFamilia.add(mesaId);
+    }
+    setMesasResaltadas(conFamilia);
+  }
+
   function alEmpezar(evento: DragStartEvent) {
     const datos = evento.active.data.current;
 
@@ -588,23 +774,24 @@ export function Planificador({
       setMoviendoMesa(true);
       return;
     }
+
+    if (datos?.tipo === "grupo") {
+      const ids = datos.ids as string[];
+      setArrastrado(ids.map((id) => porId.get(id)).filter(Boolean) as Invitado[]);
+      resaltarFamilia(ids);
+      return;
+    }
+
     if (datos?.tipo !== "invitado") return;
 
-    const invitado = porId.get(datos.invitadoId as string);
-    if (!invitado) return;
-    setArrastrado(invitado);
-
-    if (!invitado.group_id) return;
-    const conFamilia = new Set<string>();
-    for (const [otroId, mesaId] of Object.entries(asientos)) {
-      if (porId.get(otroId)?.group_id === invitado.group_id) {
-        conFamilia.add(mesaId);
-      }
-    }
-    setMesasResaltadas(conFamilia);
+    const invitadoId = datos.invitadoId as string;
+    const ids = seleccion.has(invitadoId) ? [...seleccion] : [invitadoId];
+    setArrastrado(ids.map((id) => porId.get(id)).filter(Boolean) as Invitado[]);
+    resaltarFamilia(ids);
   }
 
   function alTerminar(evento: DragEndEvent) {
+    const arrastrando = arrastrado;
     setArrastrado(null);
     setMoviendoMesa(false);
     setMesasResaltadas(new Set());
@@ -618,31 +805,39 @@ export function Planificador({
       if (!mesa) return;
       colocarMesa(
         mesaId,
-        mesa.pos_x + evento.delta.x / escala,
-        mesa.pos_y + evento.delta.y / escala,
+        mesa.pos_x + evento.delta.x / vista.escala,
+        mesa.pos_y + evento.delta.y / vista.escala,
       );
       return;
     }
 
-    if (datos.tipo !== "invitado") return;
+    const ids = arrastrando?.map((i) => i.id) ?? [];
+    if (ids.length === 0) return;
 
-    const invitadoId = datos.invitadoId as string;
     const destino = evento.over?.data.current;
-
     if (destino?.tipo === "mesa") {
-      sentarA(invitadoId, destino.mesaId as string);
+      sentarVarios(ids, destino.mesaId as string);
+      setSeleccion(new Set());
     } else if (destino?.tipo === "panel") {
-      levantarA(invitadoId);
+      levantarA(ids);
+      setSeleccion(new Set());
     }
   }
 
+  function alPulsarMesa(mesa: Mesa, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (seleccion.size > 0) {
+      sentarVarios([...seleccion], mesa.id);
+      setSeleccion(new Set());
+      return;
+    }
+    setSeleccionada(mesa.id);
+  }
+
   const mesaSeleccionada = mesas.find((m) => m.id === seleccionada) ?? null;
-  const haloVisible = moviendoMesa;
 
   return (
     <DndContext
-      // Fijo a propósito: sin él, dnd-kit numera los identificadores de
-      // accesibilidad distinto en servidor y en navegador.
       id="planificador-mesas"
       sensors={sensores}
       collisionDetection={pointerWithin}
@@ -656,28 +851,33 @@ export function Planificador({
     >
       <div className="flex flex-1 flex-col lg:flex-row">
         <PanelSinSentar
-          invitados={visiblesEnPanel}
+          invitados={sinSentar}
           totalSinSentar={sinSentar.length}
           aSentar={aSentar}
           grupos={grupos}
           grupoDe={grupoDe}
-          busqueda={busqueda}
-          setBusqueda={setBusqueda}
-          grupoFiltro={grupoFiltro}
-          setGrupoFiltro={setGrupoFiltro}
+          seleccion={seleccion}
           verRechazados={verRechazados}
           setVerRechazados={setVerRechazados}
+          alPulsarInvitado={(id, e) => marcar([id], e, sinSentar.map((i) => i.id))}
+          alPulsarGrupo={(ids, e) => marcar(ids, e)}
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
           <BarraHerramientas
             mesas={mesas.filter((m) => !m.is_head).length}
+            todasLasMesas={mesas}
+            invitados={invitados}
+            asientos={asientos}
             hayPresidencial={presidencial !== null}
             aSentar={aSentar}
-            escala={escala}
-            setEscala={setEscala}
+            escala={vista.escala}
+            setEscala={(v) => ponerEscala(v)}
+            onAjustar={ajustar}
             nivel={nivel}
             setNivel={setNivel}
+            verSillas={verSillas}
+            setVerSillas={setVerSillas}
             porBando={porBando}
             setPorBando={setPorBando}
             pendientes={pendientes}
@@ -688,8 +888,19 @@ export function Planificador({
             onAnadir={anadirUna}
             onSentarFamilias={sentarPorFamilias}
             onPlantilla={aplicarPlantilla}
-            hayMesas={mesas.length > 0}
+            onIrA={irA}
           />
+
+          {seleccion.size > 0 && (
+            <p
+              role="status"
+              className="border-b border-border bg-foreground px-4 py-2 text-sm text-background"
+            >
+              {seleccion.size}{" "}
+              {seleccion.size === 1 ? "seleccionado" : "seleccionados"}. Haz clic
+              en una mesa para sentarlos. Escape para soltar la selección.
+            </p>
+          )}
 
           {nota && (
             <p
@@ -701,42 +912,41 @@ export function Planificador({
           )}
 
           <div
-            className="relative flex-1 overflow-auto bg-canvas"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setSeleccionada(null);
-            }}
+            ref={contenedor}
+            onPointerDown={empezarPaneo}
+            onPointerMove={moverPaneo}
+            onPointerUp={terminarPaneo}
+            onPointerCancel={terminarPaneo}
+            className="relative flex-1 touch-none overflow-hidden bg-canvas"
           >
-            <div style={{ width: SALA.ancho * escala, height: SALA.alto * escala }}>
-              <div
-                style={{
-                  width: SALA.ancho,
-                  height: SALA.alto,
-                  transform: `scale(${escala})`,
-                  transformOrigin: "top left",
-                  backgroundSize: "100px 100px",
-                  backgroundImage:
-                    "linear-gradient(to right, var(--canvas-line) 1px, transparent 1px), linear-gradient(to bottom, var(--canvas-line) 1px, transparent 1px)",
-                }}
-                className="relative"
-                onClick={(e) => {
-                  if (e.target === e.currentTarget) setSeleccionada(null);
-                }}
-              >
-                {mesas.map((mesa) => (
-                  <MesaEnLienzo
-                    key={mesa.id}
-                    mesa={mesa}
-                    sentados={sentadosPorMesa.get(mesa.id) ?? []}
-                    grupoDe={grupoDe}
-                    escala={escala}
-                    halo={separacion / 2}
-                    mostrarHalo={haloVisible || seleccionada === mesa.id}
-                    resaltada={mesasResaltadas.has(mesa.id)}
-                    seleccionada={seleccionada === mesa.id}
-                    alSeleccionar={() => setSeleccionada(mesa.id)}
-                  />
-                ))}
-              </div>
+            <div
+              data-fondo="1"
+              style={{
+                width: SALA.ancho,
+                height: SALA.alto,
+                transform: `translate(${vista.x}px, ${vista.y}px) scale(${vista.escala})`,
+                transformOrigin: "0 0",
+                backgroundSize: "100px 100px",
+                backgroundImage:
+                  "linear-gradient(to right, var(--canvas-line) 1px, transparent 1px), linear-gradient(to bottom, var(--canvas-line) 1px, transparent 1px)",
+              }}
+              className="absolute left-0 top-0 border border-canvas-line bg-card/40"
+            >
+              {mesas.map((mesa) => (
+                <MesaEnLienzo
+                  key={mesa.id}
+                  mesa={mesa}
+                  sentados={sentadosPorMesa.get(mesa.id) ?? []}
+                  grupoDe={grupoDe}
+                  escala={vista.escala}
+                  halo={separacion / 2}
+                  mostrarHalo={moviendoMesa || seleccionada === mesa.id}
+                  mostrarSillas={verSillas}
+                  resaltada={mesasResaltadas.has(mesa.id)}
+                  seleccionada={seleccionada === mesa.id}
+                  alPulsar={(e) => alPulsarMesa(mesa, e)}
+                />
+              ))}
             </div>
 
             {mesas.length === 0 && (
@@ -755,626 +965,41 @@ export function Planificador({
             mesa={mesaSeleccionada}
             sentados={sentadosPorMesa.get(mesaSeleccionada.id) ?? []}
             grupoDe={grupoDe}
+            seleccion={seleccion}
             onCambiar={(cambios, persistir) =>
               cambiarMesa(mesaSeleccionada.id, cambios, persistir)
             }
-            onLevantar={levantarA}
+            onLevantar={(id) => levantarA([id])}
             onDuplicar={() => duplicar(mesaSeleccionada)}
             onBorrar={() => quitarMesa(mesaSeleccionada)}
             onCerrar={() => setSeleccionada(null)}
+            onPulsarInvitado={(id, e) =>
+              marcar(
+                [id],
+                e,
+                (sentadosPorMesa.get(mesaSeleccionada.id) ?? []).map((i) => i.id),
+              )
+            }
           />
         )}
       </div>
 
       <DragOverlay dropAnimation={null}>
-        {arrastrado ? (
+        {arrastrado && arrastrado.length > 0 ? (
           <div className="w-44">
             <CaraChip
-              invitado={arrastrado}
-              grupo={grupoDe(arrastrado)}
+              invitado={arrastrado[0]}
+              grupo={grupoDe(arrastrado[0])}
               arrastrando
             />
+            {arrastrado.length > 1 && (
+              <span className="mt-1 block rounded-sm bg-foreground px-2 py-0.5 text-center text-xs text-background">
+                y {arrastrado.length - 1} más
+              </span>
+            )}
           </div>
         ) : null}
       </DragOverlay>
     </DndContext>
-  );
-}
-
-// ---------------------------------------------------------------------------
-
-function PanelSinSentar({
-  invitados,
-  totalSinSentar,
-  aSentar,
-  grupos,
-  grupoDe,
-  busqueda,
-  setBusqueda,
-  grupoFiltro,
-  setGrupoFiltro,
-  verRechazados,
-  setVerRechazados,
-}: {
-  invitados: Invitado[];
-  totalSinSentar: number;
-  aSentar: number;
-  grupos: GrupoInvitados[];
-  grupoDe: (invitado: Invitado) => GrupoInvitados | undefined;
-  busqueda: string;
-  setBusqueda: (v: string) => void;
-  grupoFiltro: string;
-  setGrupoFiltro: (v: string) => void;
-  verRechazados: boolean;
-  setVerRechazados: (v: boolean) => void;
-}) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: "drop-panel",
-    data: { tipo: "panel" },
-  });
-
-  return (
-    <aside
-      ref={setNodeRef}
-      className={cn(
-        "flex w-full shrink-0 flex-col border-b border-border bg-sidebar lg:h-[calc(100dvh-3.5rem)] lg:w-72 lg:border-b-0 lg:border-r",
-        isOver && "bg-accent/40",
-      )}
-    >
-      <div className="border-b border-border p-3">
-        <p className="font-display text-lg leading-none tracking-tight">
-          Sin sentar
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {totalSinSentar} de {aSentar} por colocar
-        </p>
-
-        <input
-          type="search"
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          placeholder="Buscar"
-          aria-label="Buscar invitado sin sentar"
-          className="mt-3 h-8 w-full rounded-md border border-input bg-card px-2 text-sm"
-        />
-        <select
-          value={grupoFiltro}
-          onChange={(e) => setGrupoFiltro(e.target.value)}
-          aria-label="Filtrar por grupo"
-          className="mt-2 h-8 w-full rounded-md border border-input bg-card px-2 text-sm"
-        >
-          <option value="">Todos los grupos</option>
-          {grupos.map((grupo) => (
-            <option key={grupo.id} value={grupo.id}>
-              {grupo.name}
-            </option>
-          ))}
-        </select>
-        <label className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={verRechazados}
-            onChange={(e) => setVerRechazados(e.target.checked)}
-            className="size-3 accent-[var(--foreground)]"
-          />
-          Mostrar a quien no viene
-        </label>
-      </div>
-
-      <div className="min-h-24 flex-1 space-y-1 overflow-y-auto p-2">
-        {invitados.length === 0 ? (
-          <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-            {totalSinSentar === 0
-              ? "Están todos sentados."
-              : "Nadie coincide con ese filtro."}
-          </p>
-        ) : (
-          invitados.map((invitado) => (
-            <ChipInvitado
-              key={invitado.id}
-              invitado={invitado}
-              grupo={grupoDe(invitado)}
-              desdeMesa={null}
-            />
-          ))
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function BarraHerramientas({
-  mesas,
-  hayPresidencial,
-  aSentar,
-  escala,
-  setEscala,
-  nivel,
-  setNivel,
-  porBando,
-  setPorBando,
-  pendientes,
-  fallo,
-  puedeDeshacer,
-  ultimoPaso,
-  onDeshacer,
-  onAnadir,
-  onSentarFamilias,
-  onPlantilla,
-  hayMesas,
-}: {
-  mesas: number;
-  hayPresidencial: boolean;
-  aSentar: number;
-  escala: number;
-  setEscala: (v: number) => void;
-  nivel: NivelSeparacion;
-  setNivel: (v: NivelSeparacion) => void;
-  porBando: boolean;
-  setPorBando: (v: boolean) => void;
-  pendientes: number;
-  fallo: string | null;
-  puedeDeshacer: boolean;
-  ultimoPaso: string | null;
-  onDeshacer: () => void;
-  onAnadir: () => void;
-  onSentarFamilias: () => void;
-  onPlantilla: (id: string, cuantas: number, capacidad: number, enPres: number) => void;
-  hayMesas: boolean;
-}) {
-  const [abierto, setAbierto] = useState(false);
-  const [capacidad, setCapacidad] = useState(CAPACIDAD_POR_DEFECTO);
-  const [enPresidencial, setEnPresidencial] = useState(
-    PRESIDENCIAL_POR_DEFECTO.plazas,
-  );
-  const sugeridas = sugerirMesas(aSentar, capacidad, enPresidencial);
-  const [cuantas, setCuantas] = useState(sugeridas);
-  const [confirmando, setConfirmando] = useState<string | null>(null);
-
-  return (
-    <div className="border-b border-border bg-background">
-      <div className="flex flex-wrap items-center gap-2 px-4 py-2">
-        <Button size="sm" onClick={onAnadir}>
-          {hayPresidencial ? "Añadir mesa" : "Crear presidencial"}
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => setAbierto((v) => !v)}
-          aria-expanded={abierto}
-        >
-          Plantillas
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onSentarFamilias}>
-          Sentar por familias
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onDeshacer}
-          disabled={!puedeDeshacer}
-          title={ultimoPaso ? `Deshacer: ${ultimoPaso}` : "Nada que deshacer"}
-        >
-          Deshacer
-        </Button>
-
-        <span className="text-sm text-muted-foreground">
-          {mesas} {mesas === 1 ? "mesa" : "mesas"}
-        </span>
-
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              "text-sm",
-              fallo
-                ? "text-destructive"
-                : pendientes > 0
-                  ? "text-muted-foreground"
-                  : "text-accent-foreground",
-            )}
-            role="status"
-          >
-            {fallo ? fallo : pendientes > 0 ? "Guardando…" : "Guardado"}
-          </span>
-
-          <select
-            value={nivel}
-            onChange={(e) => setNivel(e.target.value as NivelSeparacion)}
-            aria-label="Separación entre mesas"
-            className="h-8 rounded-md border border-input bg-card px-2 text-xs"
-          >
-            {(
-              Object.entries(SEPARACIONES) as [
-                NivelSeparacion,
-                (typeof SEPARACIONES)[NivelSeparacion],
-              ][]
-            ).map(([clave, valor]) => (
-              <option key={clave} value={clave}>
-                {valor.etiqueta} · {valor.pie}
-              </option>
-            ))}
-          </select>
-
-          <div className="flex overflow-hidden rounded-md border border-input">
-            {ESCALAS.map((valor) => (
-              <button
-                key={valor}
-                type="button"
-                onClick={() => setEscala(valor)}
-                aria-pressed={escala === valor}
-                className={cn(
-                  "px-2 py-1 text-xs tabular-nums",
-                  escala === valor
-                    ? "bg-secondary font-medium"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {Math.round(valor * 100)}%
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {abierto && (
-        <div className="border-t border-border bg-card px-4 py-4">
-          <p className="text-sm text-muted-foreground">
-            {aSentar} invitados. Con {enPresidencial} en la presidencial y mesas
-            de {capacidad}, salen{" "}
-            <strong className="font-medium text-foreground">
-              {sugeridas} mesas
-            </strong>
-            .
-          </p>
-
-          <div className="mt-3 flex flex-wrap items-end gap-4">
-            <label className="text-sm">
-              <span className="block text-muted-foreground">Presidencial</span>
-              <select
-                value={enPresidencial}
-                onChange={(e) => {
-                  const valor = Number(e.target.value);
-                  setEnPresidencial(valor);
-                  setCuantas(sugerirMesas(aSentar, capacidad, valor));
-                }}
-                className="mt-1 h-9 rounded-md border border-input bg-card px-2 text-sm"
-              >
-                {FORMATOS_PRESIDENCIAL.map((formato) => (
-                  <option key={formato.plazas} value={formato.plazas}>
-                    {formato.nombre} ({formato.plazas})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm">
-              <span className="block text-muted-foreground">Mesas</span>
-              <input
-                type="number"
-                min={0}
-                max={60}
-                value={cuantas}
-                onChange={(e) => setCuantas(Number(e.target.value))}
-                className="mt-1 h-9 w-20 rounded-md border border-input bg-card px-2 tabular-nums"
-              />
-            </label>
-            <label className="text-sm">
-              <span className="block text-muted-foreground">Por mesa</span>
-              <input
-                type="number"
-                min={1}
-                max={40}
-                value={capacidad}
-                onChange={(e) => {
-                  const valor = Number(e.target.value);
-                  setCapacidad(valor);
-                  setCuantas(sugerirMesas(aSentar, valor, enPresidencial));
-                }}
-                className="mt-1 h-9 w-20 rounded-md border border-input bg-card px-2 tabular-nums"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => setCuantas(sugeridas)}
-              className="pb-2 text-sm underline underline-offset-4 hover:text-foreground"
-            >
-              Usar la sugerencia
-            </button>
-          </div>
-
-          <label className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={porBando}
-              onChange={(e) => setPorBando(e.target.checked)}
-              className="size-3.5 accent-[var(--foreground)]"
-            />
-            Al sentar por familias, separar los bandos a cada lado de la
-            presidencial (tradición hoy en desuso)
-          </label>
-
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            {PLANTILLAS.map((plantilla) => (
-              <div
-                key={plantilla.id}
-                className="rounded-lg border border-border p-3"
-              >
-                <p className="font-medium">{plantilla.nombre}</p>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  {plantilla.descripcion}
-                </p>
-                {confirmando === plantilla.id ? (
-                  <div className="mt-3 flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => {
-                        onPlantilla(plantilla.id, cuantas, capacidad, enPresidencial);
-                        setConfirmando(null);
-                        setAbierto(false);
-                      }}
-                    >
-                      Reemplazar
-                    </Button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmando(null)}
-                      className="text-sm text-muted-foreground"
-                    >
-                      No
-                    </button>
-                  </div>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="mt-3"
-                    onClick={() => {
-                      if (hayMesas) setConfirmando(plantilla.id);
-                      else {
-                        onPlantilla(plantilla.id, cuantas, capacidad, enPresidencial);
-                        setAbierto(false);
-                      }
-                    }}
-                  >
-                    Montar sala
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {hayMesas && (
-            <p className="mt-3 text-sm text-muted-foreground">
-              Montar una plantilla borra las mesas actuales, devuelve a todos a
-              la lista de sin sentar y vacía el historial de deshacer.
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Inspector({
-  mesa,
-  sentados,
-  grupoDe,
-  onCambiar,
-  onLevantar,
-  onDuplicar,
-  onBorrar,
-  onCerrar,
-}: {
-  mesa: Mesa;
-  sentados: Invitado[];
-  grupoDe: (invitado: Invitado) => GrupoInvitados | undefined;
-  onCambiar: (cambios: Partial<Mesa>, persistir?: boolean) => void;
-  onLevantar: (invitadoId: string) => void;
-  onDuplicar: () => void;
-  onBorrar: () => void;
-  onCerrar: () => void;
-}) {
-  const [confirmando, setConfirmando] = useState(false);
-  const pasada = sentados.length > mesa.capacity;
-  const redonda = mesa.shape === "redonda";
-
-  return (
-    <aside className="flex w-full shrink-0 flex-col border-t border-border bg-sidebar lg:h-[calc(100dvh-3.5rem)] lg:w-72 lg:border-l lg:border-t-0">
-      <div className="flex items-start justify-between gap-2 border-b border-border p-3">
-        <div className="min-w-0 flex-1">
-          {mesa.is_head && (
-            <p className="text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">
-              Presidencial
-            </p>
-          )}
-          <input
-            value={mesa.name}
-            aria-label="Nombre de la mesa"
-            onChange={(e) => onCambiar({ name: e.target.value }, false)}
-            onBlur={(e) => onCambiar({ name: e.target.value.trim() || "Mesa" })}
-            className="w-full rounded-sm bg-transparent font-display text-lg tracking-tight focus:bg-card"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={onCerrar}
-          aria-label="Cerrar"
-          className="rounded-sm px-1.5 text-muted-foreground hover:text-foreground"
-        >
-          ×
-        </button>
-      </div>
-
-      <div className="space-y-3 border-b border-border p-3">
-        {mesa.is_head && (
-          <label className="block text-sm">
-            <span className="text-muted-foreground">Quién se sienta</span>
-            <select
-              value={
-                FORMATOS_PRESIDENCIAL.find((f) => f.plazas === mesa.capacity)
-                  ?.plazas ?? ""
-              }
-              onChange={(e) => {
-                const formato = FORMATOS_PRESIDENCIAL.find(
-                  (f) => f.plazas === Number(e.target.value),
-                );
-                if (formato) {
-                  onCambiar({ shape: formato.shape, capacity: formato.plazas });
-                }
-              }}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
-            >
-              {FORMATOS_PRESIDENCIAL.map((formato) => (
-                <option key={formato.plazas} value={formato.plazas}>
-                  {formato.nombre} · {formato.pie}
-                </option>
-              ))}
-              {!FORMATOS_PRESIDENCIAL.some(
-                (f) => f.plazas === mesa.capacity,
-              ) && <option value="">A medida ({mesa.capacity})</option>}
-            </select>
-          </label>
-        )}
-
-        <label className="block text-sm">
-          <span className="text-muted-foreground">Forma</span>
-          <select
-            value={mesa.shape}
-            onChange={(e) => onCambiar({ shape: e.target.value as FormaMesa })}
-            className="mt-1 h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
-          >
-            <option value="redonda">Redonda</option>
-            <option value="rectangular">Rectangular</option>
-            <option value="imperial">Imperial</option>
-          </select>
-        </label>
-
-        <label className="block text-sm">
-          <span className="text-muted-foreground">Plazas</span>
-          <input
-            type="number"
-            min={1}
-            max={40}
-            value={mesa.capacity}
-            onChange={(e) =>
-              onCambiar({ capacity: Number(e.target.value) }, false)
-            }
-            onBlur={(e) =>
-              onCambiar({
-                capacity: Math.min(40, Math.max(1, Number(e.target.value) || 1)),
-              })
-            }
-            className="mt-1 h-9 w-full rounded-md border border-input bg-card px-2 text-sm tabular-nums"
-          />
-        </label>
-
-        <div className="text-sm">
-          <span className="text-muted-foreground">Giro</span>
-          <div className="mt-1 flex items-center gap-1">
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={redonda}
-              onClick={() => onCambiar({ rotation: mesa.rotation - 15 })}
-              aria-label="Girar a la izquierda"
-            >
-              ↺
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={redonda}
-              onClick={() => onCambiar({ rotation: mesa.rotation + 15 })}
-              aria-label="Girar a la derecha"
-            >
-              ↻
-            </Button>
-            <span className="ml-1 text-sm tabular-nums text-muted-foreground">
-              {redonda ? "Da igual en redonda" : `${mesa.rotation % 360}°`}
-            </span>
-          </div>
-        </div>
-
-        <p
-          className={cn(
-            "text-sm tabular-nums",
-            pasada ? "font-medium text-destructive" : "text-muted-foreground",
-          )}
-        >
-          {sentados.length}/{mesa.capacity} sentados
-          {pasada && " · te has pasado"}
-        </p>
-
-        {mesa.is_head && (
-          <p className="rounded-md bg-secondary p-2 text-xs leading-relaxed text-muted-foreground">
-            Protocolo: los novios en el centro, la novia a la derecha del novio.
-            Madrina a la derecha del novio y padrino a la izquierda de la novia.
-          </p>
-        )}
-      </div>
-
-      <div className="min-h-24 flex-1 space-y-1 overflow-y-auto p-2">
-        {sentados.length === 0 ? (
-          <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-            Mesa vacía. Arrastra gente aquí.
-          </p>
-        ) : (
-          sentados.map((invitado) => (
-            <div key={invitado.id} className="flex items-center gap-1">
-              <div className="min-w-0 flex-1">
-                <ChipInvitado
-                  invitado={invitado}
-                  grupo={grupoDe(invitado)}
-                  desdeMesa={mesa.id}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => onLevantar(invitado.id)}
-                aria-label={`Levantar a ${invitado.full_name}`}
-                title="Devolver a sin sentar"
-                className="rounded-sm px-1.5 py-1 text-sm text-muted-foreground hover:text-foreground"
-              >
-                ←
-              </button>
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="flex items-center gap-2 border-t border-border p-3">
-        {mesa.is_head ? (
-          <p className="text-xs text-muted-foreground">
-            La presidencial no se duplica ni se borra.
-          </p>
-        ) : confirmando ? (
-          <>
-            <Button size="sm" variant="destructive" onClick={onBorrar}>
-              Borrar mesa
-            </Button>
-            <button
-              type="button"
-              onClick={() => setConfirmando(false)}
-              className="text-sm text-muted-foreground"
-            >
-              No
-            </button>
-          </>
-        ) : (
-          <>
-            <Button size="sm" variant="secondary" onClick={onDuplicar}>
-              Duplicar
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setConfirmando(true)}
-            >
-              Borrar
-            </Button>
-          </>
-        )}
-      </div>
-    </aside>
   );
 }

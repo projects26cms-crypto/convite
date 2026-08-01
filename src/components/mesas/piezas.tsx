@@ -12,6 +12,12 @@ export const COLOR_BANDO: Record<Bando, string> = {
   ambos: "border-l-ambos",
 };
 
+export const PUNTO_BANDO: Record<Bando, string> = {
+  novia: "bg-novia",
+  novio: "bg-novio",
+  ambos: "bg-ambos",
+};
+
 export function etiquetaInvitado(invitado: Invitado): string {
   return invitado.is_child ? `${invitado.full_name} · niño` : invitado.full_name;
 }
@@ -22,22 +28,28 @@ export function CaraChip({
   grupo,
   compacto = false,
   arrastrando = false,
+  marcado = false,
+  enConflicto = false,
 }: {
   invitado: Invitado;
   grupo?: GrupoInvitados;
   compacto?: boolean;
   arrastrando?: boolean;
+  marcado?: boolean;
+  enConflicto?: boolean;
 }) {
   return (
     <span
       className={cn(
-        "block truncate rounded-sm border-l-2 bg-card text-left leading-tight",
+        "block truncate rounded-sm border-l-2 text-left leading-tight",
         compacto ? "px-1.5 py-[3px] text-[11px]" : "px-2 py-1 text-sm",
         grupo?.side ? COLOR_BANDO[grupo.side] : "border-l-border",
+        marcado ? "bg-foreground text-background" : "bg-card",
         invitado.rsvp_status === "rechazado" && "opacity-50 line-through",
+        enConflicto && "ring-1 ring-destructive",
         arrastrando
           ? "shadow-lg ring-1 ring-foreground/20"
-          : "hover:bg-secondary",
+          : !marcado && "hover:bg-secondary",
       )}
       title={
         grupo ? `${invitado.full_name} · ${grupo.name}` : invitado.full_name
@@ -53,11 +65,17 @@ export function ChipInvitado({
   grupo,
   desdeMesa,
   compacto = false,
+  marcado = false,
+  enConflicto = false,
+  alPulsar,
 }: {
   invitado: Invitado;
   grupo?: GrupoInvitados;
   desdeMesa: string | null;
   compacto?: boolean;
+  marcado?: boolean;
+  enConflicto?: boolean;
+  alPulsar?: (e: React.MouseEvent) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `inv:${invitado.id}`,
@@ -70,13 +88,86 @@ export function ChipInvitado({
       type="button"
       {...listeners}
       {...attributes}
+      onClick={(e) => {
+        e.stopPropagation();
+        alPulsar?.(e);
+      }}
       className={cn(
         "w-full cursor-grab touch-none active:cursor-grabbing",
         isDragging && "opacity-30",
       )}
     >
-      <CaraChip invitado={invitado} grupo={grupo} compacto={compacto} />
+      <CaraChip
+        invitado={invitado}
+        grupo={grupo}
+        compacto={compacto}
+        marcado={marcado}
+        enConflicto={enConflicto}
+      />
     </button>
+  );
+}
+
+/** Sillas alrededor de la mesa, en unidades de sala. Una silla ocupa 45 cm. */
+function Sillas({
+  mesa,
+  ocupadas,
+}: {
+  mesa: Pick<Mesa, "shape" | "capacity">;
+  ocupadas: number;
+}) {
+  const { ancho, alto } = tamanoMesa(mesa);
+  const plazas = Math.max(1, mesa.capacity);
+  const radio = 15;
+  const separacion = 34;
+
+  const puntos: { x: number; y: number }[] = [];
+
+  if (mesa.shape === "redonda") {
+    const r = ancho / 2 + separacion;
+    for (let i = 0; i < plazas; i++) {
+      const angulo = (i / plazas) * Math.PI * 2 - Math.PI / 2;
+      puntos.push({
+        x: ancho / 2 + Math.cos(angulo) * r,
+        y: alto / 2 + Math.sin(angulo) * r,
+      });
+    }
+  } else {
+    const arriba = Math.ceil(plazas / 2);
+    const abajo = plazas - arriba;
+    const reparte = (cuantas: number, y: number) => {
+      for (let i = 0; i < cuantas; i++) {
+        puntos.push({
+          x: ((i + 1) / (cuantas + 1)) * ancho,
+          y,
+        });
+      }
+    };
+    reparte(arriba, -separacion);
+    reparte(abajo, alto + separacion);
+  }
+
+  return (
+    <>
+      {puntos.map((punto, i) => (
+        <span
+          key={i}
+          aria-hidden
+          style={{
+            left: punto.x - radio,
+            top: punto.y - radio,
+            width: radio * 2,
+            height: radio * 2,
+          }}
+          className={cn(
+            "pointer-events-none absolute rounded-full border",
+            i < ocupadas
+              ? "border-foreground/60 bg-foreground/60"
+              : "border-foreground/30 bg-card",
+          )}
+        />
+      ))}
+    </>
   );
 }
 
@@ -93,9 +184,13 @@ export function MesaEnLienzo({
   escala,
   halo,
   mostrarHalo,
+  mostrarSillas,
   resaltada,
   seleccionada,
-  alSeleccionar,
+  fijada,
+  conConflicto,
+  fantasma,
+  alPulsar,
 }: {
   mesa: Mesa;
   sentados: Invitado[];
@@ -103,9 +198,13 @@ export function MesaEnLienzo({
   escala: number;
   halo: number;
   mostrarHalo: boolean;
+  mostrarSillas: boolean;
   resaltada: boolean;
   seleccionada: boolean;
-  alSeleccionar: () => void;
+  fijada?: boolean;
+  conConflicto?: boolean;
+  fantasma?: number;
+  alPulsar: (e: React.MouseEvent) => void;
 }) {
   const { ancho, alto } = tamanoMesa(mesa);
   const pasada = sentados.length > mesa.capacity;
@@ -157,9 +256,11 @@ export function MesaEnLienzo({
         />
       )}
 
+      {mostrarSillas && <Sillas mesa={mesa} ocupadas={sentados.length} />}
+
       <div
         ref={anclarSoltar}
-        onClick={alSeleccionar}
+        onClick={alPulsar}
         className={cn(
           "relative flex h-full w-full flex-col items-center overflow-hidden p-2",
           redonda ? "rounded-full" : "rounded-lg",
@@ -169,7 +270,8 @@ export function MesaEnLienzo({
           resaltada && "border-novia ring-4 ring-novia/25",
           isOver && "border-foreground ring-4 ring-foreground/25",
           seleccionada && "ring-2 ring-foreground/40",
-          pasada && "border-destructive",
+          (pasada || conConflicto) && "border-destructive",
+          fijada && "border-dashed",
           isDragging && "shadow-2xl",
         )}
       >
@@ -179,7 +281,9 @@ export function MesaEnLienzo({
           {...attributes}
           aria-label={`Mover ${mesa.name}`}
           style={{
-            transform: mesa.rotation ? `rotate(${-mesa.rotation}deg)` : undefined,
+            transform: mesa.rotation
+              ? `rotate(${-mesa.rotation}deg)`
+              : undefined,
           }}
           className="w-full cursor-grab touch-none px-1 active:cursor-grabbing"
         >
@@ -189,7 +293,7 @@ export function MesaEnLienzo({
               mesa.is_head ? "text-[15px] font-medium" : "text-[13px]",
             )}
           >
-            {mesa.name}
+            {fijada ? `📌 ${mesa.name}` : mesa.name}
           </span>
           <span
             className={cn(
@@ -197,7 +301,8 @@ export function MesaEnLienzo({
               pasada ? "font-medium text-destructive" : "text-muted-foreground",
             )}
           >
-            {sentados.length}/{mesa.capacity}
+            {sentados.length}
+            {fantasma ? `+${fantasma}` : ""}/{mesa.capacity}
           </span>
         </button>
 
