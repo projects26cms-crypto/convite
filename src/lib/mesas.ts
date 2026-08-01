@@ -1,10 +1,27 @@
-import type { FormaMesa, Mesa } from "@/lib/tipos";
+import { modeloEquivalente, modeloPorId } from "@/lib/modelos";
+import type { FormaMesa, Mesa, PresetSala } from "@/lib/tipos";
 
 /**
- * El lienzo mide en centímetros reales. Sin escala real no se puede exigir la
- * separación de protocolo ni imprimir un plano fiable.
+ * Todo este fichero trabaja en centímetros reales. Ninguna función de aquí
+ * conoce la escala de render: la validación no puede depender de cómo de
+ * grande se pinte nada.
  */
-export const SALA = { ancho: 2000, alto: 1400 };
+export type Sala = { ancho: number; alto: number };
+
+export const PRESETS_SALA: Record<
+  Exclude<PresetSala, "custom">,
+  Sala & { etiqueta: string }
+> = {
+  S: { ancho: 1000, alto: 800, etiqueta: "S · 10 × 8 m" },
+  M: { ancho: 1500, alto: 1200, etiqueta: "M · 15 × 12 m" },
+  L: { ancho: 2200, alto: 1600, etiqueta: "L · 22 × 16 m" },
+};
+
+export const SALA_MIN = 400;
+export const SALA_MAX = 6000;
+
+export const SALA_POR_DEFECTO: Sala = PRESETS_SALA.M;
+
 export const REJILLA = 10;
 
 /**
@@ -28,26 +45,36 @@ export type MesaNueva = {
   pos_y: number;
   rotation: number;
   is_head?: boolean;
+  template_id?: string | null;
 };
 
-type Geometria = Pick<Mesa, "shape" | "capacity">;
+type Geometria = Pick<Mesa, "shape" | "capacity"> & {
+  template_id?: string | null;
+};
 
 /**
- * Medidas del mercado español: redonda de 150 cm para 8, de 180 cm para 10.
- * Rectangular de 80 cm de ancho y 60 cm de largo por comensal.
+ * Medidas de la mesa en centímetros.
+ *
+ * Si la mesa tiene modelo del catálogo, manda el catálogo. Las creadas antes de
+ * que existiera siguen con la fórmula de siempre, para no moverles el plano por
+ * debajo.
  */
 export function tamanoMesa(mesa: Geometria): { ancho: number; alto: number } {
+  const modelo = modeloPorId(mesa.template_id);
+  if (modelo) return modelo.medidas(mesa.capacity);
+
   const plazas = Math.max(1, mesa.capacity);
 
   switch (mesa.shape) {
-    case "redonda": {
-      const diametro = Math.max(120, Math.round(plazas * 18));
-      return { ancho: diametro, alto: diametro };
-    }
     case "rectangular":
       return { ancho: Math.max(180, Math.ceil(plazas / 2) * 60), alto: 80 };
     case "imperial":
       return { ancho: Math.max(300, Math.ceil(plazas / 2) * 65), alto: 100 };
+    case "redonda":
+    default: {
+      const diametro = Math.max(120, Math.round(plazas * 18));
+      return { ancho: diametro, alto: diametro };
+    }
   }
 }
 
@@ -58,6 +85,11 @@ export function tamanoMesa(mesa: Geometria): { ancho: number; alto: number } {
 
 export type Disco = { x: number; y: number; r: number };
 
+/** Formas que se comportan como un círculo para colisiones y para el giro. */
+export function esCircular(shape: FormaMesa): boolean {
+  return shape === "redonda" || shape === "coctel";
+}
+
 export function discosDe(
   mesa: Geometria,
   x: number,
@@ -66,7 +98,9 @@ export function discosDe(
 ): Disco[] {
   const { ancho, alto } = tamanoMesa(mesa);
 
-  if (mesa.shape === "redonda") return [{ x, y, r: ancho / 2 }];
+  // Las formas compuestas (U, E) se aproximan por su rectángulo envolvente:
+  // reserva de más, nunca de menos, así nunca se valida un montaje imposible.
+  if (esCircular(mesa.shape)) return [{ x, y, r: ancho / 2 }];
 
   const radio = alto / 2;
   const recorrido = Math.max(0, ancho - alto);
@@ -87,7 +121,7 @@ export function envolvente(
   rotacion: number,
 ): { mitadAncho: number; mitadAlto: number } {
   const { ancho, alto } = tamanoMesa(mesa);
-  if (mesa.shape === "redonda") {
+  if (esCircular(mesa.shape)) {
     return { mitadAncho: ancho / 2, mitadAlto: alto / 2 };
   }
   const rad = (rotacion * Math.PI) / 180;
@@ -108,16 +142,34 @@ export function encajarEnSala(
   rotacion: number,
   x: number,
   y: number,
+  sala: Sala,
 ): { x: number; y: number } {
   const { mitadAncho, mitadAlto } = envolvente(mesa, rotacion);
   const margen = 20;
   return {
     x: Math.min(
       Math.max(x, mitadAncho + margen),
-      SALA.ancho - mitadAncho - margen,
+      Math.max(mitadAncho + margen, sala.ancho - mitadAncho - margen),
     ),
-    y: Math.min(Math.max(y, mitadAlto + margen), SALA.alto - mitadAlto - margen),
+    y: Math.min(
+      Math.max(y, mitadAlto + margen),
+      Math.max(mitadAlto + margen, sala.alto - mitadAlto - margen),
+    ),
   };
+}
+
+/** Mesas que se salen del perímetro. No se mueven solas: solo se señalan. */
+export function fueraDeSala(
+  mesa: Geometria & Pick<Mesa, "pos_x" | "pos_y" | "rotation">,
+  sala: Sala,
+): boolean {
+  const { mitadAncho, mitadAlto } = envolvente(mesa, mesa.rotation);
+  return (
+    mesa.pos_x - mitadAncho < 0 ||
+    mesa.pos_y - mitadAlto < 0 ||
+    mesa.pos_x + mitadAncho > sala.ancho ||
+    mesa.pos_y + mitadAlto > sala.alto
+  );
 }
 
 type Vecina = Pick<Mesa, "id" | "shape" | "capacity" | "pos_x" | "pos_y" | "rotation">;
@@ -170,11 +222,12 @@ export function resolverPosicion(
   y: number,
   vecinas: Vecina[],
   separacion: number,
+  sala: Sala,
 ): { x: number; y: number } | null {
   // Con margen de una casilla: al redondear a la rejilla se pierden unos
   // centímetros, y la separación no puede quedar por debajo del mínimo.
   const objetivo = separacion + REJILLA;
-  let actual = encajarEnSala(mesa, mesa.rotation, x, y);
+  let actual = encajarEnSala(mesa, mesa.rotation, x, y, sala);
 
   for (let intento = 0; intento < 40; intento++) {
     const discos = discosDe(mesa, actual.x, actual.y, mesa.rotation);
@@ -188,6 +241,7 @@ export function resolverPosicion(
         mesa.rotation,
         actual.x + empuje.dx,
         actual.y + empuje.dy,
+        sala,
       );
       movida = true;
       break;
@@ -211,6 +265,7 @@ export function buscarHueco(
   desdeY: number,
   vecinas: Vecina[],
   separacion: number,
+  sala: Sala,
 ): { x: number; y: number } | null {
   const objetivo = separacion + REJILLA;
   const { mitadAncho, mitadAlto } = envolvente(mesa, mesa.rotation);
@@ -224,6 +279,7 @@ export function buscarHueco(
         mesa.rotation,
         desdeX + Math.cos(angulo) * paso * anillo,
         desdeY + Math.sin(angulo) * paso * anillo,
+        sala,
       );
       if (haySitio(mesa, candidata.x, candidata.y, vecinas, objetivo)) {
         return {
@@ -268,7 +324,10 @@ export const FORMATOS_PRESIDENCIAL = [
 
 export const PRESIDENCIAL_POR_DEFECTO = FORMATOS_PRESIDENCIAL[1];
 
-function presidencial(plazas = PRESIDENCIAL_POR_DEFECTO.plazas): MesaNueva {
+function presidencial(
+  plazas: number,
+  sala: Sala,
+): MesaNueva {
   const formato =
     FORMATOS_PRESIDENCIAL.find((f) => f.plazas === plazas) ??
     PRESIDENCIAL_POR_DEFECTO;
@@ -277,7 +336,8 @@ function presidencial(plazas = PRESIDENCIAL_POR_DEFECTO.plazas): MesaNueva {
     name: "Presidencial",
     shape: formato.shape,
     capacity: formato.plazas,
-    pos_x: ajustarARejilla(SALA.ancho / 2),
+    template_id: "presidencial",
+    pos_x: ajustarARejilla(sala.ancho / 2),
     pos_y: 190,
     rotation: 0,
     is_head: true,
@@ -310,6 +370,7 @@ export type Plantilla = {
     capacidad: number,
     enPresidencial: number,
     separacion: number,
+    sala: Sala,
   ) => MesaNueva[];
 };
 
@@ -318,6 +379,7 @@ function redonda(nombre: string, cap: number, x: number, y: number): MesaNueva {
     name: nombre,
     shape: "redonda",
     capacity: cap,
+    template_id: modeloEquivalente("redonda", cap).id,
     pos_x: ajustarARejilla(x),
     pos_y: ajustarARejilla(y),
     rotation: 0,
@@ -330,18 +392,24 @@ function bajoPresidencial(cabecera: MesaNueva, altoMesa: number, sep: number) {
 }
 
 /** Mesas redondas en rejilla, debajo de la presidencial. */
-function enRejilla(cuantas: number, cap: number, enPres: number, sep: number) {
-  const cabecera = presidencial(enPres);
+function enRejilla(
+  cuantas: number,
+  cap: number,
+  enPres: number,
+  sep: number,
+  sala: Sala,
+) {
+  const cabecera = presidencial(enPres, sala);
   if (cuantas <= 0) return [cabecera];
 
   const { ancho } = tamanoMesa({ shape: "redonda", capacity: cap });
   const paso = ancho + sep;
   const columnas = Math.max(
     1,
-    Math.min(cuantas, Math.floor((SALA.ancho - 80) / paso)),
+    Math.min(cuantas, Math.floor((sala.ancho - 80) / paso)),
   );
 
-  const inicioX = (SALA.ancho - (columnas - 1) * paso) / 2;
+  const inicioX = (sala.ancho - (columnas - 1) * paso) / 2;
   const arriba = bajoPresidencial(cabecera, ancho, sep);
 
   return [
@@ -362,19 +430,25 @@ function enRejilla(cuantas: number, cap: number, enPres: number, sep: number) {
  * caben en un arco, se abre otro por detrás: una herradura de 15 mesas no
  * entra en una sola fila respetando el metro y medio.
  */
-function enHerradura(cuantas: number, cap: number, enPres: number, sep: number) {
-  const cabecera = presidencial(enPres);
+function enHerradura(
+  cuantas: number,
+  cap: number,
+  enPres: number,
+  sep: number,
+  sala: Sala,
+) {
+  const cabecera = presidencial(enPres, sala);
   if (cuantas <= 0) return [cabecera];
 
   const { ancho } = tamanoMesa({ shape: "redonda", capacity: cap });
   const paso = ancho + sep;
-  const centroX = SALA.ancho / 2;
+  const centroX = sala.ancho / 2;
   const centroY = bajoPresidencial(cabecera, ancho, sep) - ancho / 2;
 
   const mesas: MesaNueva[] = [];
   let radio = paso * 0.85;
 
-  while (mesas.length < cuantas && radio < SALA.alto) {
+  while (mesas.length < cuantas && radio < sala.alto) {
     const arco = (200 * Math.PI) / 180;
     const caben = Math.max(1, Math.floor((arco * radio) / paso) + 1);
     const enEsteAnillo = Math.min(caben, cuantas - mesas.length);
@@ -399,8 +473,14 @@ function enHerradura(cuantas: number, cap: number, enPres: number, sep: number) 
 }
 
 /** Imperiales en paralelo, presidiendo la presidencial. */
-function enFilas(cuantas: number, cap: number, enPres: number, sep: number) {
-  const cabecera = presidencial(enPres);
+function enFilas(
+  cuantas: number,
+  cap: number,
+  enPres: number,
+  sep: number,
+  sala: Sala,
+) {
+  const cabecera = presidencial(enPres, sala);
   if (cuantas <= 0) return [cabecera];
 
   const capLarga = Math.max(cap, 12);
@@ -412,10 +492,10 @@ function enFilas(cuantas: number, cap: number, enPres: number, sep: number) {
   const pasoY = alto + sep;
   const columnas = Math.max(
     1,
-    Math.min(cuantas, Math.floor((SALA.ancho - 80) / pasoX)),
+    Math.min(cuantas, Math.floor((sala.ancho - 80) / pasoX)),
   );
 
-  const inicioX = (SALA.ancho - (columnas - 1) * pasoX) / 2;
+  const inicioX = (sala.ancho - (columnas - 1) * pasoX) / 2;
   const arriba = bajoPresidencial(cabecera, alto, sep);
 
   return [
@@ -424,6 +504,7 @@ function enFilas(cuantas: number, cap: number, enPres: number, sep: number) {
       name: `Mesa ${i + 1}`,
       shape: "imperial" as const,
       capacity: capLarga,
+      template_id: "imperial",
       pos_x: ajustarARejilla(inicioX + (i % columnas) * pasoX),
       pos_y: ajustarARejilla(arriba + Math.floor(i / columnas) * pasoY),
       rotation: 0,
@@ -439,6 +520,7 @@ function enFilas(cuantas: number, cap: number, enPres: number, sep: number) {
 export function distribuirSinSolapes(
   mesas: MesaNueva[],
   separacion: number,
+  sala: Sala,
 ): { colocadas: MesaNueva[]; descartadas: number } {
   const colocadas: MesaNueva[] = [];
   let descartadas = 0;
@@ -448,14 +530,15 @@ export function distribuirSinSolapes(
       id: `p${i}`,
       shape: m.shape,
       capacity: m.capacity,
+      template_id: m.template_id,
       pos_x: m.pos_x,
       pos_y: m.pos_y,
       rotation: m.rotation,
     }));
 
     const destino =
-      resolverPosicion(mesa, mesa.pos_x, mesa.pos_y, yaPuestas, separacion) ??
-      buscarHueco(mesa, mesa.pos_x, mesa.pos_y, yaPuestas, separacion);
+      resolverPosicion(mesa, mesa.pos_x, mesa.pos_y, yaPuestas, separacion, sala) ??
+      buscarHueco(mesa, mesa.pos_x, mesa.pos_y, yaPuestas, separacion, sala);
 
     if (!destino) {
       descartadas++;

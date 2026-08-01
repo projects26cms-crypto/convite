@@ -2,10 +2,26 @@
 
 import { obtenerBodaPorSlug } from "@/lib/datos/bodas";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { ajustarARejilla, encajarEnSala, type MesaNueva } from "@/lib/mesas";
+import {
+  ajustarARejilla,
+  encajarEnSala,
+  type MesaNueva,
+  type Sala,
+} from "@/lib/mesas";
+import { modeloPorId } from "@/lib/modelos";
 import type { Boda, FormaMesa, Mesa, Regla, TipoRegla } from "@/lib/tipos";
 
-const FORMAS: FormaMesa[] = ["redonda", "rectangular", "imperial"];
+const FORMAS: FormaMesa[] = [
+  "redonda",
+  "rectangular",
+  "imperial",
+  "cuadrada",
+  "media_luna",
+  "presidencial",
+  "u",
+  "e",
+  "coctel",
+];
 
 async function resolverBoda(slug: string): Promise<Boda> {
   const boda = await obtenerBodaPorSlug(slug);
@@ -13,26 +29,39 @@ async function resolverBoda(slug: string): Promise<Boda> {
   return boda;
 }
 
-function sanear(mesa: MesaNueva) {
+function sanear(mesa: MesaNueva, sala: Sala) {
   const forma = FORMAS.includes(mesa.shape) ? mesa.shape : "redonda";
-  const capacidad = Math.min(40, Math.max(1, Math.round(mesa.capacity)));
+  const modelo = modeloPorId(mesa.template_id);
+  const capacidad = Math.min(40, Math.max(0, Math.round(mesa.capacity)));
   const giro = ((Math.round(mesa.rotation) % 360) + 360) % 360;
+  const geometria = {
+    shape: forma,
+    capacity: capacidad,
+    template_id: modelo?.id ?? null,
+  };
   const { x, y } = encajarEnSala(
-    { shape: forma, capacity: capacidad },
+    geometria,
     giro,
     ajustarARejilla(mesa.pos_x),
     ajustarARejilla(mesa.pos_y),
+    sala,
   );
 
   return {
     name: mesa.name.replace(/\s+/g, " ").trim().slice(0, 60) || "Mesa",
     shape: forma,
     capacity: capacidad,
+    template_id: modelo?.id ?? null,
     pos_x: x,
     pos_y: y,
     rotation: giro,
     is_head: mesa.is_head === true,
   };
+}
+
+/** Las medidas de la sala son del modelo de la boda, no una constante. */
+function salaDe(boda: Boda): Sala {
+  return { ancho: Number(boda.room_width), alto: Number(boda.room_height) };
 }
 
 export async function crearMesas(
@@ -47,7 +76,7 @@ export async function crearMesas(
     .insert(
       nuevas
         .slice(0, 60)
-        .map((mesa) => ({ ...sanear(mesa), wedding_id: boda.id })),
+        .map((mesa) => ({ ...sanear(mesa, salaDe(boda)), wedding_id: boda.id })),
     )
     .select("*");
 
@@ -80,6 +109,7 @@ export async function actualizarMesa(
     shape?: FormaMesa;
     capacity?: number;
     rotation?: number;
+    template_id?: string | null;
   },
 ): Promise<void> {
   const boda = await resolverBoda(slug);
@@ -94,10 +124,13 @@ export async function actualizarMesa(
     parche.shape = cambios.shape;
   }
   if (cambios.capacity !== undefined) {
-    parche.capacity = Math.min(40, Math.max(1, Math.round(cambios.capacity)));
+    parche.capacity = Math.min(40, Math.max(0, Math.round(cambios.capacity)));
   }
   if (cambios.rotation !== undefined) {
     parche.rotation = ((Math.round(cambios.rotation) % 360) + 360) % 360;
+  }
+  if (cambios.template_id !== undefined) {
+    parche.template_id = modeloPorId(cambios.template_id)?.id ?? null;
   }
   if (Object.keys(parche).length === 0) return;
 

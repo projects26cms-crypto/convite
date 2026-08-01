@@ -2,7 +2,18 @@
 
 export type Bando = "novia" | "novio" | "ambos";
 export type EstadoRsvp = "pendiente" | "confirmado" | "rechazado";
-export type FormaMesa = "redonda" | "rectangular" | "imperial";
+export type FormaMesa =
+  | "redonda"
+  | "rectangular"
+  | "imperial"
+  | "cuadrada"
+  | "media_luna"
+  | "presidencial"
+  | "u"
+  | "e"
+  | "coctel";
+
+export type PresetSala = "S" | "M" | "L" | "custom";
 
 export type Boda = {
   id: string;
@@ -11,6 +22,10 @@ export type Boda = {
   event_date: string | null;
   venue: string | null;
   owner_id: string | null;
+  /** Medidas de la sala en centímetros. */
+  room_width: number;
+  room_height: number;
+  room_preset: PresetSala;
   created_at: string;
 };
 
@@ -47,6 +62,8 @@ export type Mesa = {
   is_head: boolean;
   /** Fijada: el reparto automático no la toca. */
   is_locked: boolean;
+  /** Modelo del catálogo con el que se creó. */
+  template_id: string | null;
   created_at: string;
 };
 

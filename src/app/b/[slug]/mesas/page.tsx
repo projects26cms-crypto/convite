@@ -41,6 +41,10 @@ export default async function PaginaMesas({ params }: Props) {
       mesasIniciales={mesas}
       asignacionesIniciales={asignaciones}
       reglasIniciales={reglas}
+      sala={{
+        ancho: Number(boda.room_width),
+        alto: Number(boda.room_height),
+      }}
     />
   );
 }

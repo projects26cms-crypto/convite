@@ -42,13 +42,13 @@ import {
   CAPACIDAD_POR_DEFECTO,
   PLANTILLAS,
   PRESIDENCIAL_POR_DEFECTO,
-  SALA,
   SEPARACIONES,
   buscarHueco,
   distribuirSinSolapes,
   resolverPosicion,
   type MesaNueva,
   type NivelSeparacion,
+  type Sala,
 } from "@/lib/mesas";
 import type {
   Asignacion,
@@ -73,6 +73,7 @@ export function Planificador({
   mesasIniciales,
   asignacionesIniciales,
   reglasIniciales,
+  sala,
 }: {
   slug: string;
   invitados: Invitado[];
@@ -80,6 +81,7 @@ export function Planificador({
   mesasIniciales: Mesa[];
   asignacionesIniciales: Asignacion[];
   reglasIniciales: Regla[];
+  sala: Sala;
 }) {
   const [mesas, setMesas] = useState<Mesa[]>(mesasIniciales);
   const [asientos, setAsientos] = useState<Record<string, string>>(() =>
@@ -335,8 +337,8 @@ export function Planificador({
 
       const otras = mesas.filter((m) => m.id !== mesaId);
       const destino =
-        resolverPosicion(mesa, x, y, otras, separacion) ??
-        buscarHueco(mesa, x, y, otras, separacion);
+        resolverPosicion(mesa, x, y, otras, separacion, sala) ??
+        buscarHueco(mesa, x, y, otras, separacion, sala);
 
       if (!destino) {
         setNota("Ahí no cabe sin invadir la separación. La mesa vuelve a su sitio.");
@@ -365,7 +367,7 @@ export function Planificador({
         },
       });
     },
-    [guardar, mesas, registrar, separacion, slug],
+    [guardar, mesas, registrar, sala, separacion, slug],
   );
 
   function anadirMesas(nuevas: MesaNueva[], etiqueta: string) {
@@ -399,7 +401,7 @@ export function Planificador({
             name: "Presidencial",
             shape: PRESIDENCIAL_POR_DEFECTO.shape,
             capacity: PRESIDENCIAL_POR_DEFECTO.plazas,
-            pos_x: SALA.ancho / 2,
+            pos_x: sala.ancho / 2,
             pos_y: 190,
             rotation: 0,
             is_head: true,
@@ -418,10 +420,11 @@ export function Planificador({
     };
     const hueco = buscarHueco(
       plantilla,
-      SALA.ancho / 2,
-      SALA.alto / 2,
+      sala.ancho / 2,
+      sala.alto / 2,
       mesas,
       separacion,
+      sala,
     );
     if (!hueco) {
       setNota("La sala está llena. Quita una mesa o baja la separación.");
@@ -435,7 +438,14 @@ export function Planificador({
 
   function duplicar(mesa: Mesa) {
     if (mesa.is_head) return;
-    const hueco = buscarHueco(mesa, mesa.pos_x, mesa.pos_y, mesas, separacion);
+    const hueco = buscarHueco(
+      mesa,
+      mesa.pos_x,
+      mesa.pos_y,
+      mesas,
+      separacion,
+      sala,
+    );
     if (!hueco) {
       setNota("No hay hueco al lado para la copia.");
       return;
@@ -465,8 +475,9 @@ export function Planificador({
     if (!plantilla) return;
 
     const { colocadas, descartadas } = distribuirSinSolapes(
-      plantilla.generar(cuantas, cap, enPres, separacion),
+      plantilla.generar(cuantas, cap, enPres, separacion, sala),
       separacion,
+      sala,
     );
 
     guardar(async () => {
@@ -510,6 +521,7 @@ export function Planificador({
           siguiente.pos_y,
           mesas.filter((m) => m.id !== mesaId),
           separacion,
+          sala,
         );
         if (resuelta) posicion = resuelta;
       }
@@ -553,7 +565,7 @@ export function Planificador({
         },
       });
     },
-    [guardar, mesas, registrar, separacion, slug],
+    [guardar, mesas, registrar, sala, separacion, slug],
   );
 
   function quitarMesa(mesa: Mesa) {
@@ -702,15 +714,15 @@ export function Planificador({
     const caja = contenedor.current?.getBoundingClientRect();
     if (!caja) return;
     const escala = Math.min(
-      (caja.width - 48) / SALA.ancho,
-      (caja.height - 48) / SALA.alto,
+      (caja.width - 48) / sala.ancho,
+      (caja.height - 48) / sala.alto,
     );
     setVista({
       escala,
-      x: (caja.width - SALA.ancho * escala) / 2,
-      y: (caja.height - SALA.alto * escala) / 2,
+      x: (caja.width - sala.ancho * escala) / 2,
+      y: (caja.height - sala.alto * escala) / 2,
     });
-  }, []);
+  }, [sala.ancho, sala.alto]);
 
   useEffect(() => {
     ajustar();
@@ -1022,8 +1034,8 @@ export function Planificador({
             <div
               data-fondo="1"
               style={{
-                width: SALA.ancho,
-                height: SALA.alto,
+                width: sala.ancho,
+                height: sala.alto,
                 transform: `translate(${vista.x}px, ${vista.y}px) scale(${vista.escala})`,
                 transformOrigin: "0 0",
                 backgroundSize: "100px 100px",

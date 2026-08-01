@@ -2,7 +2,13 @@
 
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 
-import { tamanoMesa } from "@/lib/mesas";
+import { esCircular, tamanoMesa } from "@/lib/mesas";
+import {
+  SILLA_RADIO,
+  modeloEquivalente,
+  modeloPorId,
+  sillasDe,
+} from "@/lib/modelos";
 import type { Bando, GrupoInvitados, Invitado, Mesa } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
 
@@ -108,44 +114,35 @@ export function ChipInvitado({
   );
 }
 
-/** Sillas alrededor de la mesa, en unidades de sala. Una silla ocupa 45 cm. */
+/**
+ * Sillas alrededor de la mesa, en centímetros de sala.
+ *
+ * Las posiciones salen del catálogo, que es la misma función que alimenta las
+ * miniaturas del selector: si cambia el reparto de sillas, cambian las dos.
+ */
 function Sillas({
   mesa,
   ocupadas,
 }: {
-  mesa: Pick<Mesa, "shape" | "capacity">;
+  mesa: Pick<Mesa, "shape" | "capacity" | "is_head"> & {
+    template_id?: string | null;
+  };
   ocupadas: number;
 }) {
   const { ancho, alto } = tamanoMesa(mesa);
-  const plazas = Math.max(1, mesa.capacity);
-  const radio = 15;
-  const separacion = 34;
+  const modelo =
+    modeloPorId(mesa.template_id) ??
+    modeloEquivalente(mesa.shape, mesa.capacity, mesa.is_head);
 
-  const puntos: { x: number; y: number }[] = [];
+  const caja = modelo.medidas(mesa.capacity);
+  const kx = caja.ancho === 0 ? 1 : ancho / caja.ancho;
+  const ky = caja.alto === 0 ? 1 : alto / caja.alto;
+  const radio = SILLA_RADIO;
 
-  if (mesa.shape === "redonda") {
-    const r = ancho / 2 + separacion;
-    for (let i = 0; i < plazas; i++) {
-      const angulo = (i / plazas) * Math.PI * 2 - Math.PI / 2;
-      puntos.push({
-        x: ancho / 2 + Math.cos(angulo) * r,
-        y: alto / 2 + Math.sin(angulo) * r,
-      });
-    }
-  } else {
-    const arriba = Math.ceil(plazas / 2);
-    const abajo = plazas - arriba;
-    const reparte = (cuantas: number, y: number) => {
-      for (let i = 0; i < cuantas; i++) {
-        puntos.push({
-          x: ((i + 1) / (cuantas + 1)) * ancho,
-          y,
-        });
-      }
-    };
-    reparte(arriba, -separacion);
-    reparte(abajo, alto + separacion);
-  }
+  const puntos = sillasDe(modelo, mesa.capacity).map((silla) => ({
+    x: silla.x * kx,
+    y: silla.y * ky,
+  }));
 
   return (
     <>
@@ -208,7 +205,7 @@ export function MesaEnLienzo({
 }) {
   const { ancho, alto } = tamanoMesa(mesa);
   const pasada = sentados.length > mesa.capacity;
-  const redonda = mesa.shape === "redonda";
+  const redonda = esCircular(mesa.shape);
 
   const {
     attributes,
