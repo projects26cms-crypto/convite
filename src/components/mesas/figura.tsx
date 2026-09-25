@@ -73,14 +73,20 @@ export function FiguraMesa({
   );
 }
 
+/**
+ * Sillas de la mesa. Con `colores`, cada silla ocupada toma el color del bando
+ * de quien se sienta ahí: de un vistazo se ve cómo se reparte la sala.
+ */
 export function SillasFigura({
   modelo,
   capacidad,
   ocupadas = 0,
+  colores,
 }: {
   modelo: ModeloMesa;
   capacidad: number;
   ocupadas?: number;
+  colores?: string[];
 }) {
   return (
     <>
@@ -91,9 +97,11 @@ export function SillasFigura({
           cy={silla.y}
           r={SILLA_RADIO}
           className={
-            i < ocupadas
-              ? "fill-foreground/60 stroke-foreground/60"
-              : "fill-card stroke-foreground/30"
+            colores
+              ? (colores[i] ?? "fill-card stroke-foreground/20")
+              : i < ocupadas
+                ? "fill-foreground/60 stroke-foreground/60"
+                : "fill-card stroke-foreground/30"
           }
           strokeWidth={3}
         />

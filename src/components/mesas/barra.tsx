@@ -6,6 +6,18 @@ import { PanelReglas } from "@/components/mesas/reglas";
 import { SelectorModelos } from "@/components/mesas/selector-modelos";
 import { PRESETS_SALA, SALA_MAX, SALA_MIN, type Sala } from "@/lib/mesas";
 import type { ModeloMesa } from "@/lib/modelos";
+import {
+  Check,
+  Handshake,
+  LayoutGrid,
+  LoaderCircle,
+  Plus,
+  Ruler,
+  TriangleAlert,
+  Undo2,
+  Users,
+} from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import {
   CAPACIDAD_POR_DEFECTO,
@@ -19,6 +31,7 @@ import {
 import type { Invitado, Mesa, Regla, TipoRegla } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
 
+/** A quién afecta «Sentar por familias», según lo que haya seleccionado. */
 export type Alcance = "todos" | "mesa" | "marcados";
 
 function normalizar(valor: string): string {
@@ -67,9 +80,9 @@ function BuscadorGlobal({
         }}
         onFocus={() => setAbierto(true)}
         onBlur={() => window.setTimeout(() => setAbierto(false), 150)}
-        placeholder="Buscar a alguien"
+        placeholder="¿Dónde está…?"
         aria-label="Buscar a cualquier invitado y llevarme a su mesa"
-        className="h-8 w-44 rounded-md border border-input bg-card px-2 text-sm"
+        className="h-8 w-40 rounded-md border border-input bg-card px-2.5 text-sm placeholder:text-muted-foreground/80 sm:w-48"
       />
 
       {abierto && resultados.length > 0 && (
@@ -109,9 +122,6 @@ export function BarraHerramientas({
   asientos,
   hayPresidencial,
   aSentar,
-  escala,
-  setEscala,
-  onAjustar,
   nivel,
   setNivel,
   verSillas,
@@ -131,10 +141,7 @@ export function BarraHerramientas({
   incumplidas,
   onCrearRegla,
   onBorrarRegla,
-  alcance,
-  setAlcance,
-  haySeleccion,
-  hayMesaElegida,
+  etiquetaReparto,
   modeloElegido,
   onElegirModelo,
   sala,
@@ -147,9 +154,6 @@ export function BarraHerramientas({
   asientos: Record<string, string>;
   hayPresidencial: boolean;
   aSentar: number;
-  escala: number;
-  setEscala: (v: number) => void;
-  onAjustar: () => void;
   nivel: NivelSeparacion;
   setNivel: (v: NivelSeparacion) => void;
   verSillas: boolean;
@@ -174,10 +178,7 @@ export function BarraHerramientas({
   incumplidas: Set<string>;
   onCrearRegla: (kind: TipoRegla, a: string, b: string) => void;
   onBorrarRegla: (id: string) => void;
-  alcance: Alcance;
-  setAlcance: (v: Alcance) => void;
-  haySeleccion: boolean;
-  hayMesaElegida: boolean;
+  etiquetaReparto: string;
   modeloElegido: string | null;
   onElegirModelo: (modelo: ModeloMesa | null) => void;
   sala: Sala;
@@ -204,87 +205,76 @@ export function BarraHerramientas({
 
   return (
     <div className="border-b border-border bg-background">
-      <div className="flex flex-wrap items-center gap-2 px-4 py-2">
-        <Button size="sm" onClick={onAnadir}>
-          {hayPresidencial ? "Añadir mesa" : "Crear presidencial"}
-        </Button>
-        <Button
-          size="sm"
-          variant={panel === "modelos" ? "default" : "secondary"}
-          onClick={() => alterna("modelos")}
-          aria-expanded={panel === "modelos"}
-        >
-          Modelos
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => alterna("plantillas")}
-          aria-expanded={panel === "plantillas"}
-        >
-          Plantillas
-        </Button>
-        <span className="flex items-center overflow-hidden rounded-md border border-input">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Button
             size="sm"
-            variant="secondary"
-            className="rounded-none border-0"
-            onClick={onSentarFamilias}
+            onClick={() => (hayPresidencial ? alterna("modelos") : onAnadir())}
+            aria-expanded={panel === "modelos"}
+            className="gap-1.5"
           >
-            Sentar por familias
+            <Plus aria-hidden className="size-4" />
+            {hayPresidencial ? "Añadir mesa" : "Crear presidencial"}
           </Button>
-          <select
-            value={alcance}
-            onChange={(e) => setAlcance(e.target.value as Alcance)}
-            aria-label="A quién afecta el reparto"
-            className="h-8 border-l border-input bg-card px-1.5 text-xs"
+          <Button
+            size="sm"
+            variant={panel === "plantillas" ? "secondary" : "ghost"}
+            onClick={() => alterna("plantillas")}
+            aria-expanded={panel === "plantillas"}
+            className="gap-1.5"
           >
-            <option value="todos">a todos los que faltan</option>
-            <option value="mesa" disabled={!hayMesaElegida}>
-              solo a esta mesa
-            </option>
-            <option value="marcados" disabled={!haySeleccion}>
-              solo a los marcados
-            </option>
-          </select>
-        </span>
+            <LayoutGrid aria-hidden className="size-4" />
+            Plantillas
+          </Button>
+        </div>
 
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => alterna("reglas")}
-          aria-expanded={panel === "reglas"}
-        >
-          Reglas
-          {reglas.length > 0 && (
-            <span
-              className={cn(
-                "ml-1 rounded-sm px-1 text-xs tabular-nums",
-                sinCumplir > 0
-                  ? "bg-destructive text-white"
-                  : "bg-secondary text-muted-foreground",
-              )}
-            >
-              {sinCumplir > 0 ? sinCumplir : reglas.length}
-            </span>
-          )}
-        </Button>
+        <span aria-hidden className="mx-1 hidden h-5 w-px bg-border sm:block" />
 
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onDeshacer}
-          disabled={!puedeDeshacer}
-          title={ultimoPaso ? `Deshacer: ${ultimoPaso}` : "Nada que deshacer"}
-        >
-          Deshacer
-        </Button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onSentarFamilias}
+            className="gap-1.5"
+            title="Propone un reparto y te lo enseña antes de aplicarlo"
+          >
+            <Users aria-hidden className="size-4" />
+            {etiquetaReparto}
+          </Button>
+          <Button
+            size="sm"
+            variant={panel === "reglas" ? "secondary" : "ghost"}
+            onClick={() => alterna("reglas")}
+            aria-expanded={panel === "reglas"}
+            className="gap-1.5"
+            title={
+              sinCumplir > 0
+                ? `${sinCumplir} ${sinCumplir === 1 ? "regla sin cumplir" : "reglas sin cumplir"}`
+                : "Quién va junto y quién no"
+            }
+          >
+            {sinCumplir > 0 ? (
+              <TriangleAlert aria-hidden className="size-4 text-destructive" />
+            ) : (
+              <Handshake aria-hidden className="size-4" />
+            )}
+            Reglas
+            {reglas.length > 0 && (
+              <span
+                className={cn(
+                  "rounded-full px-1.5 text-[11px] tabular-nums",
+                  sinCumplir > 0
+                    ? "bg-destructive text-white"
+                    : "bg-secondary text-muted-foreground",
+                )}
+              >
+                {sinCumplir > 0 ? `${sinCumplir} sin cumplir` : reglas.length}
+              </span>
+            )}
+          </Button>
+        </div>
 
-        <span className="text-sm text-muted-foreground">
-          {mesas} {mesas === 1 ? "mesa" : "mesas"}
-        </span>
-
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-1.5">
           <BuscadorGlobal
             invitados={invitados}
             mesas={todasLasMesas}
@@ -293,26 +283,54 @@ export function BarraHerramientas({
           />
 
           <Button
-            size="sm"
+            size="icon-sm"
             variant="ghost"
+            onClick={onDeshacer}
+            disabled={!puedeDeshacer}
+            aria-label={ultimoPaso ? `Deshacer: ${ultimoPaso}` : "Nada que deshacer"}
+            title={ultimoPaso ? `Deshacer: ${ultimoPaso} (Ctrl+Z)` : "Nada que deshacer"}
+          >
+            <Undo2 aria-hidden className="size-4" />
+          </Button>
+
+          <Button
+            size="sm"
+            variant={panel === "sala" ? "secondary" : "ghost"}
             onClick={() => alterna("sala")}
             aria-expanded={panel === "sala"}
+            className="gap-1.5"
           >
+            <Ruler aria-hidden className="size-4" />
             Sala
           </Button>
 
           <span
             className={cn(
-              "text-sm",
-              fallo
-                ? "text-destructive"
-                : pendientes > 0
-                  ? "text-muted-foreground"
-                  : "text-accent-foreground",
+              "flex items-center gap-1 whitespace-nowrap pl-1 text-xs",
+              fallo ? "text-destructive" : "text-muted-foreground",
             )}
             role="status"
+            title={fallo ?? undefined}
           >
-            {fallo ? fallo : pendientes > 0 ? "Guardando…" : "Guardado"}
+            {fallo ? (
+              <>
+                <TriangleAlert aria-hidden className="size-3.5" />
+                No se ha guardado
+              </>
+            ) : pendientes > 0 ? (
+              <>
+                <LoaderCircle
+                  aria-hidden
+                  className="size-3.5 animate-spin motion-reduce:animate-none"
+                />
+                Guardando
+              </>
+            ) : (
+              <>
+                <Check aria-hidden className="size-3.5 text-novia" />
+                Guardado
+              </>
+            )}
           </span>
         </div>
       </div>
@@ -412,34 +430,6 @@ export function BarraHerramientas({
                 </option>
               ))}
             </select>
-          </label>
-
-          <label className="text-sm">
-            <span className="block text-muted-foreground">Zoom</span>
-            <div className="mt-1 flex items-center gap-1">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setEscala(escala / 1.25)}
-                aria-label="Alejar"
-              >
-                −
-              </Button>
-              <span className="w-12 text-center text-sm tabular-nums">
-                {Math.round(escala * 100)}%
-              </span>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setEscala(escala * 1.25)}
-                aria-label="Acercar"
-              >
-                +
-              </Button>
-              <Button size="sm" variant="secondary" onClick={onAjustar}>
-                Ajustar
-              </Button>
-            </div>
           </label>
 
           <label className="flex items-center gap-2 pb-2 text-sm text-muted-foreground">

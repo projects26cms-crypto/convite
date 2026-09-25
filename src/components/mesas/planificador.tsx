@@ -17,14 +17,21 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   useTransition,
 } from "react";
+import { Maximize2, Minus, Plus, X } from "lucide-react";
 
 import { BarraHerramientas, type Alcance } from "@/components/mesas/barra";
 import { Inspector } from "@/components/mesas/inspector";
 import { PanelSinSentar } from "@/components/mesas/panel";
 import { MiniaturaModelo } from "@/components/mesas/figura";
-import { CaraChip, MesaEnLienzo } from "@/components/mesas/piezas";
+import {
+  CaraChip,
+  MesaEnLienzo,
+  PUNTO_BANDO,
+  ordenarPorFamilia,
+} from "@/components/mesas/piezas";
 import { Button } from "@/components/ui/button";
 import {
   actualizarMesa,
@@ -52,11 +59,20 @@ import {
   encajarEnSala,
   fueraDeSala,
   resolverPosicion,
+  tamanoMesa,
   type MesaNueva,
   type NivelSeparacion,
   type Sala,
 } from "@/lib/mesas";
 import type { ModeloMesa } from "@/lib/modelos";
+import {
+  ESCALA_VISUAL_MAX,
+  ESCALA_VISUAL_MIN,
+  acotarEscalaVisual,
+  escalaSinSolape,
+  escalaVisualAutomatica,
+} from "@/lib/vista";
+import { cn } from "@/lib/utils";
 import type {
   Asignacion,
   GrupoInvitados,
@@ -72,6 +88,59 @@ const ESCALA_MIN = 0.12;
 const ESCALA_MAX = 1.4;
 
 type Paso = { etiqueta: string; deshacer: () => void };
+
+/**
+ * El tamaño de las mesas en pantalla es una preferencia de quien mira, no un
+ * dato del plano: se guarda en este navegador. Si el almacenamiento falla, se
+ * recuerda mientras dure la sesión.
+ */
+const CLAVE_ESCALA = "convite:escala-mesas";
+const EVENTO_ESCALA = "convite:escala-mesas";
+let escalaEnMemoria = "auto";
+
+function leerEscala(): string {
+  try {
+    return window.localStorage.getItem(CLAVE_ESCALA) ?? escalaEnMemoria;
+  } catch {
+    return escalaEnMemoria;
+  }
+}
+
+function guardarEscala(valor: string) {
+  escalaEnMemoria = valor;
+  try {
+    window.localStorage.setItem(CLAVE_ESCALA, valor);
+  } catch {
+    // Sin almacenamiento: vale con la memoria de la sesión.
+  }
+  window.dispatchEvent(new Event(EVENTO_ESCALA));
+}
+
+function suscribirEscala(avisar: () => void) {
+  window.addEventListener("storage", avisar);
+  window.addEventListener(EVENTO_ESCALA, avisar);
+  return () => {
+    window.removeEventListener("storage", avisar);
+    window.removeEventListener(EVENTO_ESCALA, avisar);
+  };
+}
+
+/** Longitud de la barra de escala: la mayor que quepa en unos 110 px. */
+function tramoDeEscala(pxPorCm: number): number {
+  const opciones = [50, 100, 200, 500, 1000, 2000];
+  return (
+    [...opciones].reverse().find((cm) => cm * pxPorCm <= 110) ?? opciones[0]
+  );
+}
+
+function sombraSala(escala: number): string {
+  const u = 1 / escala;
+  return `0 0 0 ${u}px var(--canvas-line), 0 ${10 * u}px ${30 * u}px -${12 * u}px rgb(0 0 0 / 0.18)`;
+}
+
+function metros(cm: number): string {
+  return `${(cm / 100).toLocaleString("es-ES", { maximumFractionDigits: 1 })} m`;
+}
 type Vista = { x: number; y: number; escala: number };
 
 export function Planificador({
@@ -113,7 +182,13 @@ export function Planificador({
     pares: Par[];
     resumen: string;
   } | null>(null);
-  const [alcance, setAlcance] = useState<Alcance>("todos");
+  const modoEscala = useSyncExternalStore(
+    suscribirEscala,
+    leerEscala,
+    () => "auto",
+  );
+  const [encima, setEncima] = useState<string | null>(null);
+  const [lienzo, setLienzo] = useState({ ancho: 0, alto: 0 });
 
   const [pendientes, setPendientes] = useState(0);
   const [fallo, setFallo] = useState<string | null>(null);
@@ -139,6 +214,17 @@ export function Planificador({
   );
 
   const separacion = SEPARACIONES[nivel].cm;
+
+  // Escala visual: solo presentación. Al mover una mesa se vuelve a la real,
+  // porque en ese momento lo que importa es el espacio físico.
+  const escalaAuto = useMemo(() => escalaVisualAutomatica(mesas), [mesas]);
+  const escalaTope = useMemo(() => escalaSinSolape(mesas), [mesas]);
+  const escalaElegida =
+    modoEscala === "auto"
+      ? escalaAuto
+      : acotarEscalaVisual(Number(modoEscala) || 1);
+  const escalaMesas = moviendoMesa ? 1 : escalaElegida;
+  const vistaExagerada = modoEscala !== "auto" && escalaElegida > escalaTope;
 
   const guardar = useCallback((tarea: () => Promise<void>) => {
     setPendientes((n) => n + 1);
@@ -276,6 +362,16 @@ export function Planificador({
       });
       guardar(() => sentarEnBloque(slug, pares));
 
+      // No se bloquea: a veces se aprieta una silla más a propósito. Pero se
+      // dice en voz alta, que meter a 70 en una mesa de 10 no pase en silencio.
+      const mesa = mesas.find((m) => m.id === mesaId);
+      const tras = (sentadosPorMesa.get(mesaId)?.length ?? 0) + pares.length;
+      if (mesa && mesa.capacity > 0 && tras > mesa.capacity) {
+        setNota(
+          `${mesa.name} se pasa de plazas: ${tras} de ${mesa.capacity}. Ctrl+Z lo deshace.`,
+        );
+      }
+
       const nombre =
         etiqueta ??
         (pares.length === 1
@@ -311,7 +407,7 @@ export function Planificador({
         },
       });
     },
-    [asientos, guardar, porId, registrar, slug],
+    [asientos, guardar, mesas, porId, registrar, sentadosPorMesa, slug],
   );
 
   const levantarA = useCallback(
@@ -632,6 +728,23 @@ export function Planificador({
     });
   }
 
+  /** A quién afecta el reparto, según lo que haya seleccionado. */
+  const alcance: Alcance =
+    seleccion.size > 0
+      ? "marcados"
+      : seleccionada &&
+          !mesas.find((m) => m.id === seleccionada)?.is_head &&
+          !mesas.find((m) => m.id === seleccionada)?.is_locked
+        ? "mesa"
+        : "todos";
+
+  const etiquetaReparto =
+    alcance === "marcados"
+      ? `Repartir a ${seleccion.size === 1 ? "1 marcado" : `los ${seleccion.size} marcados`}`
+      : alcance === "mesa"
+        ? `Llenar ${mesas.find((m) => m.id === seleccionada)?.name ?? "la mesa"}`
+        : "Sentar por familias";
+
   /** No sienta a nadie: propone y espera confirmación. */
   function proponerReparto() {
     const { pares, sinSitio, partidos } = repartir({
@@ -731,9 +844,10 @@ export function Planificador({
   const ajustar = useCallback(() => {
     const caja = contenedor.current?.getBoundingClientRect();
     if (!caja) return;
+    // Margen para que quepan las cotas de la sala a los lados.
     const escala = Math.min(
-      (caja.width - 48) / sala.ancho,
-      (caja.height - 48) / sala.alto,
+      (caja.width - 88) / sala.ancho,
+      (caja.height - 88) / sala.alto,
     );
     setVista({
       escala,
@@ -759,6 +873,19 @@ export function Planificador({
         y: py - (py - previa.y) * factor,
       };
     });
+  }, []);
+
+  useEffect(() => {
+    const nodo = contenedor.current;
+    if (!nodo) return;
+    const observador = new ResizeObserver(([entrada]) =>
+      setLienzo({
+        ancho: entrada.contentRect.width,
+        alto: entrada.contentRect.height,
+      }),
+    );
+    observador.observe(nodo);
+    return () => observador.disconnect();
   }, []);
 
   // La rueda necesita listener no pasivo para poder frenar el desplazamiento.
@@ -1065,6 +1192,10 @@ export function Planificador({
   }
 
   const mesaSeleccionada = mesas.find((m) => m.id === seleccionada) ?? null;
+  const mesaEncima = mesas.find((m) => m.id === encima) ?? null;
+  const plazas = mesas.reduce((suma, m) => suma + m.capacity, 0);
+
+  const tramo = tramoDeEscala(vista.escala);
 
   return (
     <DndContext
@@ -1091,9 +1222,12 @@ export function Planificador({
           setVerRechazados={setVerRechazados}
           alPulsarInvitado={(id, e) => marcar([id], e, sinSentar.map((i) => i.id))}
           alPulsarGrupo={(ids, e) => marcar(ids, e)}
+          sentados={Object.keys(asientos).length}
+          mesas={mesas.length}
+          plazas={plazas}
         />
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-h-[80dvh] min-w-0 flex-1 flex-col lg:min-h-0">
           <BarraHerramientas
             mesas={mesas.filter((m) => !m.is_head).length}
             todasLasMesas={mesas}
@@ -1101,9 +1235,6 @@ export function Planificador({
             asientos={asientos}
             hayPresidencial={presidencial !== null}
             aSentar={aSentar}
-            escala={vista.escala}
-            setEscala={(v) => ponerEscala(v)}
-            onAjustar={ajustar}
             nivel={nivel}
             setNivel={setNivel}
             verSillas={verSillas}
@@ -1123,10 +1254,7 @@ export function Planificador({
             incumplidas={roto.invitados}
             onCrearRegla={anadirRegla}
             onBorrarRegla={quitarRegla}
-            alcance={alcance}
-            setAlcance={setAlcance}
-            haySeleccion={seleccion.size > 0}
-            hayMesaElegida={seleccionada !== null}
+            etiquetaReparto={etiquetaReparto}
             modeloElegido={modeloElegido?.id ?? null}
             onElegirModelo={(modelo) => {
               setModeloElegido(modelo);
@@ -1136,68 +1264,6 @@ export function Planificador({
             presetSala={presetSala}
             onCambiarSala={cambiarSala}
           />
-
-          {modeloElegido && (
-            <p
-              role="status"
-              className="border-b border-border bg-foreground px-4 py-2 text-sm text-background"
-            >
-              Pulsa en el plano para colocar {modeloElegido.nombre}.
-            </p>
-          )}
-
-          {mesasFuera.length > 0 && (
-            <div className="flex flex-wrap items-center gap-3 border-b border-border bg-destructive/10 px-4 py-2 text-sm">
-              <span className="text-destructive">
-                {mesasFuera.length}{" "}
-                {mesasFuera.length === 1
-                  ? "mesa se queda fuera de la sala"
-                  : "mesas se quedan fuera de la sala"}
-                . No he movido ni borrado nada.
-              </span>
-              <Button size="sm" variant="secondary" onClick={reubicarDentro}>
-                Reubicar dentro
-              </Button>
-            </div>
-          )}
-
-          {propuesta && (
-            <div className="flex flex-wrap items-center gap-3 border-b border-border bg-accent px-4 py-2 text-sm text-accent-foreground">
-              <span>{propuesta.resumen} Míralo en el plano antes de aplicar.</span>
-              <span className="ml-auto flex items-center gap-2">
-                <Button size="sm" onClick={aplicarPropuesta}>
-                  Aplicar
-                </Button>
-                <button
-                  type="button"
-                  onClick={() => setPropuesta(null)}
-                  className="text-sm underline underline-offset-4"
-                >
-                  Descartar
-                </button>
-              </span>
-            </div>
-          )}
-
-          {seleccion.size > 0 && (
-            <p
-              role="status"
-              className="border-b border-border bg-foreground px-4 py-2 text-sm text-background"
-            >
-              {seleccion.size}{" "}
-              {seleccion.size === 1 ? "seleccionado" : "seleccionados"}. Haz clic
-              en una mesa para sentarlos. Escape para soltar la selección.
-            </p>
-          )}
-
-          {nota && (
-            <p
-              role="status"
-              className="border-b border-border bg-accent px-4 py-2 text-sm text-accent-foreground"
-            >
-              {nota}
-            </p>
-          )}
 
           <div
             ref={contenedor}
@@ -1210,6 +1276,7 @@ export function Planificador({
             }}
             onPointerLeave={() => setFantasmaMesa(null)}
             onPointerUp={(e) => {
+              if ((e.target as HTMLElement).closest("[data-flotante]")) return;
               if (modeloElegido) {
                 colocarModelo(e.clientX, e.clientY);
                 return;
@@ -1228,16 +1295,11 @@ export function Planificador({
                 transformOrigin: "0 0",
                 backgroundSize: "100px 100px",
                 backgroundImage:
-                  "linear-gradient(to right, var(--canvas-line) 1px, transparent 1px), linear-gradient(to bottom, var(--canvas-line) 1px, transparent 1px)",
+                  "linear-gradient(to right, color-mix(in oklch, var(--canvas-line) 55%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklch, var(--canvas-line) 55%, transparent) 1px, transparent 1px)",
+                boxShadow: sombraSala(vista.escala),
               }}
-              className="absolute left-0 top-0 border border-canvas-line bg-card/40"
+              className="absolute left-0 top-0 bg-card"
             >
-              <div
-                aria-hidden
-                data-fondo="1"
-                style={{ width: sala.ancho, height: sala.alto }}
-                className="absolute left-0 top-0 border-2 border-foreground/25"
-              />
 
               {modeloElegido && fantasmaMesa && (
                 <div
@@ -1265,6 +1327,7 @@ export function Planificador({
                   sentados={sentadosPorMesa.get(mesa.id) ?? []}
                   grupoDe={grupoDe}
                   escala={vista.escala}
+                  escalaVisual={escalaMesas}
                   halo={separacion / 2}
                   mostrarHalo={moviendoMesa || seleccionada === mesa.id}
                   mostrarSillas={verSillas}
@@ -1275,15 +1338,228 @@ export function Planificador({
                   conConflicto={roto.mesas.has(mesa.id)}
                   fantasma={fantasmas.get(mesa.id)}
                   alPulsar={(e) => alPulsarMesa(mesa, e)}
+                  alEntrar={(e) => {
+                    if (e.pointerType !== "touch" && !arrastrado && !moviendoMesa)
+                      setEncima(mesa.id);
+                  }}
+                  alSalir={() => setEncima(null)}
                 />
               ))}
+            </div>
+
+            {/* Cotas de la sala, como en un plano de verdad. */}
+            {mesas.length > 0 && (
+              <>
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute text-[11px] font-medium tabular-nums text-muted-foreground"
+                  style={{
+                    left: vista.x + (sala.ancho * vista.escala) / 2,
+                    top: vista.y - 20,
+                    transform: "translateX(-50%)",
+                  }}
+                >
+                  {metros(sala.ancho)}
+                </span>
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute text-[11px] font-medium tabular-nums text-muted-foreground"
+                  style={{
+                    left: vista.x - 8,
+                    top: vista.y + (sala.alto * vista.escala) / 2,
+                    transform: "translate(-100%, -50%)",
+                  }}
+                >
+                  {metros(sala.alto)}
+                </span>
+              </>
+            )}
+
+            {/* Tarjeta de la mesa bajo el ratón. En táctil se usa el panel lateral. */}
+            {mesaEncima && !arrastrado && !moviendoMesa && (
+              <TarjetaMesa
+                mesa={mesaEncima}
+                sentados={ordenarPorFamilia(
+                  sentadosPorMesa.get(mesaEncima.id) ?? [],
+                  grupoDe,
+                )}
+                grupoDe={grupoDe}
+                x={vista.x + mesaEncima.pos_x * vista.escala}
+                arriba={
+                  vista.y +
+                  (mesaEncima.pos_y -
+                    (tamanoMesa(mesaEncima).alto / 2) * escalaMesas -
+                    55) *
+                    vista.escala
+                }
+                abajo={
+                  vista.y +
+                  (mesaEncima.pos_y +
+                    (tamanoMesa(mesaEncima).alto / 2) * escalaMesas +
+                    55) *
+                    vista.escala
+                }
+                lienzo={lienzo}
+              />
+            )}
+
+            {/* Escala gráfica */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute bottom-4 left-4 flex flex-col gap-1 text-[11px] font-medium text-muted-foreground"
+            >
+              <span>{metros(tramo)}</span>
+              <span
+                className="h-1.5 border-x border-b border-foreground/50"
+                style={{ width: tramo * vista.escala }}
+              />
+            </div>
+
+            {/* Zoom y tamaño de las mesas */}
+            <div
+              data-flotante
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              className="absolute bottom-4 right-4 z-30 flex flex-wrap items-center gap-1 rounded-lg border border-border bg-card/95 p-1 shadow-sm backdrop-blur"
+            >
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => ponerEscala(vista.escala / 1.25)}
+                aria-label="Alejar"
+              >
+                <Minus aria-hidden className="size-4" />
+              </Button>
+              <span className="w-11 text-center text-xs tabular-nums text-muted-foreground">
+                {Math.round(vista.escala * 100)}%
+              </span>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => ponerEscala(vista.escala * 1.25)}
+                aria-label="Acercar"
+              >
+                <Plus aria-hidden className="size-4" />
+              </Button>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={ajustar}
+                aria-label="Ver la sala entera"
+                title="Ver la sala entera"
+              >
+                <Maximize2 aria-hidden className="size-4" />
+              </Button>
+
+              <span aria-hidden className="mx-1 h-5 w-px bg-border" />
+
+              <label
+                htmlFor="escala-mesas"
+                className="pl-1 text-xs text-muted-foreground"
+              >
+                Mesas
+              </label>
+              <input
+                id="escala-mesas"
+                type="range"
+                min={ESCALA_VISUAL_MIN}
+                max={ESCALA_VISUAL_MAX}
+                step={0.05}
+                value={escalaElegida}
+                onChange={(e) => guardarEscala(e.target.value)}
+                aria-valuetext={`${Math.round(escalaElegida * 100)} % del tamaño real`}
+                className="w-20 accent-[var(--foreground)]"
+              />
+              <button
+                type="button"
+                onClick={() => guardarEscala("auto")}
+                aria-pressed={modoEscala === "auto"}
+                title="El mayor tamaño que no hace chocar mesas en pantalla"
+                className={cn(
+                  "rounded-md px-2 py-1 text-xs",
+                  modoEscala === "auto"
+                    ? "bg-secondary font-medium text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Auto
+              </button>
+            </div>
+
+            {/* Avisos: flotan sobre el plano en lugar de empujarlo hacia abajo. */}
+            <div
+              data-flotante
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              className="pointer-events-none absolute inset-x-0 bottom-16 z-30 flex flex-col items-center gap-2 px-4"
+            >
+              {vistaExagerada && (
+                <Aviso tono="suave">
+                  Las mesas se ven más grandes de lo que caben: la vista no es
+                  fiel al montaje.
+                </Aviso>
+              )}
+
+              {mesasFuera.length > 0 && (
+                <Aviso tono="peligro">
+                  {mesasFuera.length}{" "}
+                  {mesasFuera.length === 1
+                    ? "mesa se queda fuera de la sala"
+                    : "mesas se quedan fuera de la sala"}
+                  . No he movido ni borrado nada.
+                  <Button size="sm" variant="secondary" onClick={reubicarDentro}>
+                    Meterlas dentro
+                  </Button>
+                </Aviso>
+              )}
+
+              {nota && (
+                <Aviso tono="suave" onCerrar={() => setNota(null)}>
+                  {nota}
+                </Aviso>
+              )}
+
+              {modeloElegido && (
+                <Aviso tono="fuerte" onCerrar={() => setModeloElegido(null)}>
+                  Pulsa en el plano para colocar {modeloElegido.nombre}.
+                </Aviso>
+              )}
+
+              {seleccion.size > 0 && !propuesta && (
+                <Aviso tono="fuerte" onCerrar={() => setSeleccion(new Set())}>
+                  {seleccion.size === 1
+                    ? "1 marcado"
+                    : `${seleccion.size} marcados`}
+                  . Pulsa una mesa para sentarlos.
+                </Aviso>
+              )}
+
+              {propuesta && (
+                <Aviso tono="fuerte">
+                  {propuesta.resumen}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={aplicarPropuesta}
+                  >
+                    Aplicar
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setPropuesta(null)}
+                    className="text-sm underline underline-offset-4"
+                  >
+                    Descartar
+                  </button>
+                </Aviso>
+              )}
             </div>
 
             {mesas.length === 0 && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
                 <p className="max-w-sm text-center text-muted-foreground">
-                  Aún no hay mesas. Elige una plantilla ahí arriba y te monto la
-                  sala entera, presidencial incluida.
+                  Aún no hay mesas. Pulsa <b>Plantillas</b> y te monto la sala
+                  entera, presidencial incluida.
                 </p>
               </div>
             )}
@@ -1333,5 +1609,128 @@ export function Planificador({
         ) : null}
       </DragOverlay>
     </DndContext>
+  );
+}
+
+function Aviso({
+  tono,
+  children,
+  onCerrar,
+}: {
+  tono: "fuerte" | "suave" | "peligro";
+  children: React.ReactNode;
+  onCerrar?: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      className={cn(
+        "pointer-events-auto flex max-w-2xl flex-wrap items-center gap-x-3 gap-y-2 rounded-lg px-4 py-2.5 text-sm shadow-lg",
+        tono === "fuerte" && "bg-foreground text-background",
+        tono === "suave" && "border border-border bg-card text-foreground",
+        tono === "peligro" &&
+          "border border-destructive/30 bg-card text-destructive",
+      )}
+    >
+      {children}
+      {onCerrar && (
+        <button
+          type="button"
+          onClick={onCerrar}
+          aria-label="Cerrar el aviso"
+          className="-mr-1 rounded p-0.5 opacity-70 hover:opacity-100"
+        >
+          <X aria-hidden className="size-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Quién se sienta en la mesa, al pasar el ratón por encima. */
+function TarjetaMesa({
+  mesa,
+  sentados,
+  grupoDe,
+  x,
+  arriba,
+  abajo,
+  lienzo,
+}: {
+  mesa: Mesa;
+  sentados: Invitado[];
+  grupoDe: (invitado: Invitado) => GrupoInvitados | undefined;
+  x: number;
+  arriba: number;
+  abajo: number;
+  lienzo: { ancho: number; alto: number };
+}) {
+  const libres = mesa.capacity - sentados.length;
+  const visibles = sentados.slice(0, 12);
+
+  // Encima de la mesa si cabe; si no, debajo. Y nunca fuera por los lados.
+  const altoTarjeta = 76 + Math.min(sentados.length, 13) * 21;
+  const debajo = arriba - altoTarjeta < 8;
+  const mitad = 124;
+  const izquierda =
+    lienzo.ancho > mitad * 2
+      ? Math.min(Math.max(x, mitad + 8), lienzo.ancho - mitad - 8)
+      : x;
+
+  return (
+    <div
+      role="tooltip"
+      className={cn(
+        "pointer-events-none absolute z-40 w-60 -translate-x-1/2 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-lg",
+        !debajo && "-translate-y-full",
+      )}
+      style={{ left: izquierda, top: debajo ? abajo : arriba }}
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="truncate font-display text-base">{mesa.name}</p>
+        <p
+          className={cn(
+            "shrink-0 text-xs font-medium tabular-nums",
+            libres < 0 ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {mesa.capacity === 0 ? "De pie" : `${sentados.length}/${mesa.capacity}`}
+        </p>
+      </div>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        {mesa.capacity === 0
+          ? "Mesa de cóctel, sin sillas"
+          : libres > 0
+            ? `${libres} ${libres === 1 ? "sitio libre" : "sitios libres"}`
+            : libres === 0
+              ? "Completa"
+              : `Te has pasado en ${-libres}`}
+      </p>
+
+      {sentados.length > 0 && (
+        <ul className="mt-2 space-y-1 border-t border-border pt-2">
+          {visibles.map((invitado) => {
+            const bando = grupoDe(invitado)?.side;
+            return (
+              <li key={invitado.id} className="flex items-center gap-2 text-[13px]">
+                <span
+                  aria-hidden
+                  className={cn(
+                    "size-2 shrink-0 rounded-full",
+                    bando ? PUNTO_BANDO[bando] : "bg-foreground/25",
+                  )}
+                />
+                <span className="truncate">{invitado.full_name}</span>
+              </li>
+            );
+          })}
+          {sentados.length > visibles.length && (
+            <li className="text-xs text-muted-foreground">
+              y {sentados.length - visibles.length} más
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
   );
 }
