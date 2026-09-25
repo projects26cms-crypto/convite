@@ -93,12 +93,13 @@ Criterios que el usuario dejó fuera de esta iteración: el test del invariante 
 
 ## Problemas conocidos
 
-- **Base de datos inaccesible desde el 25/09/2026.** El dominio
-  `mwwpbxcomogudsbaxyzw.supabase.co` ya no resuelve y producción devuelve error 500 en
-  `/b/...`. Lo más probable es que Supabase haya pausado el proyecto por inactividad (el
-  plan gratuito lo hace tras una semana sin uso). Se reactiva desde el panel de Supabase
-  con *Restore project*. Si el proyecto ya no existe, hay que crear uno nuevo, ejecutar
-  las cuatro migraciones y cambiar las dos claves en `.env.local` y en Vercel.
+- **Supabase pausa el proyecto si no se usa.** El plan gratuito lo pausó por inactividad
+  y el 25/09/2026 producción daba error 500 en `/b/...`, porque el dominio
+  `mwwpbxcomogudsbaxyzw.supabase.co` dejó de resolver. Se reactivó desde el panel con
+  *Restore project* sin perder nada (150 invitados, 17 mesas, 73 asignaciones, 1 regla).
+  Si vuelve a pasar: mismo botón. Si algún día el proyecto ya no aparece, crear uno
+  nuevo, ejecutar las cuatro migraciones y cambiar las dos claves en `.env.local` y en
+  Vercel.
 - **Datos de prueba desordenados** en la boda `ines-santi-7k2mq4x9`: 150 invitados
   inventados, mesas por encima de su capacidad y la presidencial a 120 cm de la Mesa 15
   tras crecer de 180 a 300 cm con el catálogo. Montar una plantilla de sala lo rehace.
