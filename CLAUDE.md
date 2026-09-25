@@ -3,106 +3,122 @@
 # Convite — contexto del proyecto
 
 App web de gestión de bodas para el mercado español. El producto completo cubrirá
-invitados, RSVP digital, mesas, regalos, música, menús y logística. **Hoy solo se
-construye y publica el módulo de invitados + mesas**, pero el modelo de datos debe
-soportar el resto sin refactor.
+invitados, RSVP digital, mesas, regalos, música, menús y logística. **Hoy existen el
+módulo de invitados y el planificador de mesas**; el modelo de datos debe soportar el
+resto sin refactor.
 
 Usuario objetivo: novios organizando su propia boda (más adelante, wedding planners con
 varias). Idioma de la interfaz: **español de España**.
+
+Historial, decisiones y pendientes al detalle: [`docs/estado-del-proyecto.md`](docs/estado-del-proyecto.md).
 
 ## Decisiones cerradas — no cuestionar
 
 | Decisión | Valor |
 |---|---|
-| Alcance día 1 | Invitados + planificador visual de mesas + salida imprimible |
 | Autenticación | **Ninguna.** Acceso por código de boda en la URL |
-| Persistencia | Base de datos real desde el minuto uno (nada de `localStorage` como almacén) |
-| Publicación | Producción en Vercel antes de escribir la primera función |
+| Persistencia | Base de datos real (nada de `localStorage` como almacén) |
+| Publicación | Cada fase se despliega a producción al terminarla |
+| Asignación | Invitado → **mesa**, no → silla. Las sillas concretas son una iteración aparte |
+| Tests | Sin runner de tests por decisión del usuario; se verifica en el navegador |
 
 ## Stack
 
-Next.js 16 (App Router) · TypeScript · Tailwind v4 · shadcn/ui · Supabase (Postgres) ·
-dnd-kit · Vercel · impresión con `@media print` + `window.print()`.
+Next.js 16 (App Router, Turbopack) · TypeScript · Tailwind v4 · shadcn/ui · Supabase
+(Postgres) · dnd-kit · Vercel.
 
-**No añadir:** ORM adicional (usar el cliente de Supabase), gestor de estado global,
-librería de gráficos, i18n, tests E2E, librería de PDF.
+**No añadir sin preguntar:** ORM, gestor de estado global, librería de gráficos, i18n,
+tests E2E, librería de PDF, cualquier dependencia nueva.
 
-> Next 16 tiene cambios de ruptura respecto a versiones anteriores. Antes de escribir
-> código de servidor, consultar `node_modules/next/dist/docs/`.
+> Next 16 tiene cambios de ruptura. Antes de escribir código de servidor, consultar
+> `node_modules/next/dist/docs/`. `params` llega como `Promise`.
 
-## Arquitectura de acceso — leer dos veces
+## Acceso — leer dos veces
 
-No hay login. El acceso es por URL `/b/[slug]`, con un `slug` no adivinable
-(ej. `ines-santi-9f3k2p`, mínimo 8 caracteres aleatorios además del nombre). Ese código
-funciona como credencial portadora.
+No hay login. El acceso es por URL `/b/[slug]`, con un `slug` no adivinable (nombre +
+8 caracteres aleatorios). Ese código funciona como credencial portadora.
 
-- **Nunca exponer la clave `anon` de Supabase al cliente** para leer ni escribir.
+- **Nunca exponer la clave `anon` de Supabase al cliente.**
 - RLS activado en todas las tablas y **sin ninguna política**: todo acceso desde cliente
   queda denegado por defecto.
-- Todas las lecturas y escrituras pasan por Server Actions / Route Handlers que usan
-  `SUPABASE_SERVICE_ROLE_KEY` en servidor y **validan el `slug`** antes de tocar nada.
-- `SUPABASE_SERVICE_ROLE_KEY` nunca lleva prefijo `NEXT_PUBLIC_`.
+- Toda lectura y escritura pasa por Server Actions que usan `SUPABASE_SERVICE_ROLE_KEY`
+  y **validan el `slug`** (`obtenerBodaPorSlug`) antes de tocar nada. Cada `update` y
+  `delete` filtra además por `wedding_id`.
+- `SUPABASE_SERVICE_ROLE_KEY` nunca lleva prefijo `NEXT_PUBLIC_`. Se ha verificado que
+  no aparece en `.next/static`.
+- Un fichero `"use server"` **solo puede exportar funciones asíncronas**. Tipos y
+  constantes compartidas van aparte (ver `src/lib/acciones/estado.ts`).
 
-## Esquema de base de datos
+## Unidades y escalas — invariante crítico
 
-Tablas de hoy: `weddings`, `guest_groups`, `guests`, `event_tables`, `seat_assignments`.
-El SQL vive en [`supabase/schema.sql`](supabase/schema.sql).
+- **El modelo vive en centímetros reales.** Sala, medidas de mesa, posiciones
+  (`pos_x`/`pos_y` = centro de la mesa), separaciones.
+- **La escala de render es solo presentación** (`vista.escala` en el planificador).
+- **Ninguna validación lee valores de render**: colisión, separación, perímetro y
+  capacidad operan en cm. El arrastre convierte con `delta / vista.escala` y persiste cm.
+- Cualquier cambio futuro de "escala visual" no puede tocar `src/lib/mesas.ts` ni
+  `src/lib/modelos.ts`.
 
-Notas de diseño:
-- `weddings.owner_id` queda a `null` hoy: es el punto de anclaje para la auth futura.
-- `seat_assignments` tiene `unique (guest_id)`: un invitado ocupa como mucho un asiento.
-- `guests` es la columna vertebral: de ella colgarán RSVP, menús y regalos.
+## Mapa del código
 
-**Tablas futuras — no crear hoy, pero no romper su encaje:** `gifts`, `songs`, `menus`,
-`transport`, `tasks`, `vendors`. Todas cuelgan de `wedding_id` y varias de `guest_id`.
+| Qué | Dónde |
+|---|---|
+| Catálogo de modelos de mesa: medidas, contorno, sillas | `src/lib/modelos.ts` (`MODELOS`, `figurasDe`, `sillasDe`) |
+| Geometría, colisión, sala, plantillas de sala | `src/lib/mesas.ts` |
+| Reparto automático y reglas | `src/lib/autosentar.ts` |
+| Importación por pegado | `src/lib/importar.ts` |
+| Server Actions | `src/lib/acciones/{invitados,mesas}.ts` |
+| Lecturas | `src/lib/datos/{bodas,invitados,mesas}.ts` |
+| Planificador (estado, arrastre, vista) | `src/components/mesas/planificador.tsx` |
+| Dibujo de mesa (SVG desde el catálogo) | `src/components/mesas/{piezas,figura}.tsx` |
+| Panel, barra, inspector, reglas, selector | `src/components/mesas/*.tsx` |
 
-## Fases
+**Una sola geometría:** la mesa del plano y la miniatura del selector salen de las mismas
+funciones del catálogo. No duplicar geometría en componentes.
 
-1. **Esqueleto en producción** — Next + repo + Vercel, landing mínima. *Criterio:* URL pública que carga.
-2. **Base de datos** — Supabase, SQL, variables de entorno, lectura por `slug`. *Criterio:* `/b/[slug]` renderiza el nombre de una boda.
-3. **Invitados** — CRUD de invitados y grupos, importación masiva por pegado, contadores. *Criterio:* se pegan 120 nombres y persisten.
-4. **Planificador de mesas** — el núcleo. Panel de no asignados, lienzo con mesas arrastrables, ocupación, resaltado de grupo, autoguardado. *Criterio:* 100 invitados en 12 mesas sobreviven a una recarga.
-5. **Salida imprimible** — `/b/[slug]/plano` en A4 horizontal: plano de sala, listado alfabético invitado → mesa, listado por mesa.
-6. **Cierre** — landing con creación de boda, estados vacíos, favicon, metadatos, móvil.
+## Base de datos
 
-Prioridad si falta tiempo: fases 1–4. Luego la 5. La 6 puede caer.
+Tablas: `weddings`, `guest_groups`, `guests`, `event_tables`, `seat_assignments`,
+`seating_rules`. Todo cuelga de `wedding_id`.
+
+Para una base nueva, ejecutar en orden en el SQL Editor de Supabase:
+`supabase/schema.sql` → `002-presidencial.sql` → `003-reglas.sql` → `004-sala-y-modelos.sql`.
+Las cuatro están aplicadas en producción. Los cambios de esquema **los ejecuta el
+usuario**; no desplegar código que dependa de una migración hasta que esté aplicada.
+
+Notas:
+- `event_tables.is_head`: la presidencial. Índice único → como mucho una por boda. No se
+  borra ni se duplica (también lo rechaza el servidor).
+- `event_tables.is_locked`: el reparto automático no la toca.
+- `event_tables.template_id`: modelo del catálogo. Sin él, `tamanoMesa` usa la fórmula
+  antigua.
+- `weddings.room_width/room_height` en cm, `room_preset` S/M/L/custom.
+- `seat_assignments.seat_number` existe pero **no se usa**.
+- `seating_rules`: parejas `juntos`/`separados`, índice único sobre el par sin orden.
+
+**Tablas futuras — no crear, pero no romper su encaje:** `gifts`, `songs`, `menus`,
+`transport`, `tasks`, `vendors`.
 
 ## Dirección de diseño
 
-Evitar el look genérico de SaaS. **Nada de fondo crema + serif de alto contraste +
-acento terracota**: es el aspecto por defecto que genera cualquier IA y se nota.
-
-- **El plano de sala es el protagonista.** Todo lo demás es cromo. Que las mesas se lean
-  como objetos físicos, no como tarjetas de un panel de administración.
-- **Tipografía:** `Fraunces` (display, con contención, en títulos y nombres de mesa) +
-  `Inter Tight` (sans estrecha, para densidad de datos en listas).
-- **Color:** paleta corta que **codifica información**, no decora. Tokens en
-  `src/app/globals.css`: `--novia` (verde), `--novio` (granate), `--ambos` (grafito),
-  `--confirmado` / `--pendiente` / `--rechazado`, `--canvas` / `--canvas-line` para el
-  lienzo del plano. Papel frío y tinta azulada, sin crema.
-- **Movimiento:** solo en el arrastre, con peso. Ninguna animación de entrada.
-- **Copia:** verbos en activa, mayúscula solo inicial, sin relleno. "Sentar a Marta", no
-  "Asignar comensal". Estados vacíos que invitan: "Aún no hay mesas. Crea la primera."
-- Usable en tableta, foco de teclado visible, `prefers-reduced-motion` respetado.
+- **El plano de sala es el protagonista.** Mesas como objetos físicos, no tarjetas.
+- **Nada de crema + serif de alto contraste + terracota.** Papel frío, tinta azulada.
+- **Tipografía:** `Fraunces` (display, con contención) + `Inter Tight` (datos).
+- **Color que codifica información:** `--novia` verde, `--novio` granate, `--ambos`
+  grafito, `--confirmado`/`--pendiente`/`--rechazado`, `--canvas`/`--canvas-line`.
+- **Movimiento solo en el arrastre.** `prefers-reduced-motion` respetado.
+- **Copia:** verbos en activa, mayúscula solo inicial. "Sentar a Marta".
 
 ## Reglas de trabajo
 
-- Antes de cada fase, resumir en tres líneas qué se va a hacer y esperar confirmación.
-- Un commit por fase, con mensaje descriptivo.
-- Desplegar a producción al terminar cada fase, no solo al final.
-- Si una fase se alarga más del doble de lo estimado, parar y proponer recortar alcance.
-
-## Después de hoy (no construir)
-
-1. **Semana 1:** RSVP digital — enlace público por invitado, confirmación, alergias, menú.
-2. **Semanas 2–3:** Supabase Auth, migración de bodas a `owner_id`, panel multi-boda.
-3. **Mes 2:** Stripe, tramo gratuito hasta 30 invitados.
-4. **Backlog:** regalos, playlist colaborativa, restricciones de "no sentar juntos",
-   transporte, escaleta del día.
+- Antes de cada fase, resumir en tres líneas y esperar confirmación.
+- Un commit por fase, con mensaje descriptivo. Desplegar al terminar cada fase.
+- Verificar en el navegador antes de dar algo por hecho: consola limpia, sin
+  desbordamiento horizontal, recarga y persistencia.
+- Si una fase se alarga más del doble, parar y proponer recortar alcance.
 
 ## Riesgo de negocio
 
-Bodas.net ofrece un organizador de mesas gratuito en España. Este módulo por sí solo no
-es monetizable. El valor defendible tendrá que venir de la integración
-RSVP + mesas + logística + comunicación en un solo sitio, o del ángulo de wedding
-planners con varias bodas. Conviene validarlo antes de invertir en Stripe.
+Bodas.net ofrece un organizador de mesas gratuito en España. El valor defendible tiene
+que venir de integrar RSVP + mesas + logística, o del ángulo de wedding planners con
+varias bodas. Validarlo antes de invertir en Stripe.
