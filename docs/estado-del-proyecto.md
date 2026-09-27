@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-Última actualización: 25 de septiembre de 2026. Último commit: `299cc0d`.
+Última actualización: 27 de septiembre de 2026. Último commit: `4d1c71b`.
 
 ## Dónde vive cada cosa
 
@@ -46,6 +46,7 @@ y Data API (la URL del proyecto).
 | Protocolo | Lienzo en centímetros, separación mínima 1,50 / 1,20 / 1,00 m con deslizamiento automático, presidencial (`is_head`), sentar por familias, deshacer, girar, duplicar | `9cd6ad4`, `92218ff` |
 | Velocidad e interfaz | Sentar con dos clics, panel agrupado por familias, selección múltiple, sillas visibles, navegación del lienzo (paneo, rueda, ajustar), buscar y llevar | `eb8f9f8` |
 | Reglas y reparto | Reglas `juntos`/`separados`, reparto con vista previa y alcance, mesas fijadas, vaciar mesa | `6720a97` |
+| Interfaz legible | Rótulos a tamaño fijo en pantalla, sillas pintadas por bando, sala con cotas y escala gráfica, presidencial en tinta, barra con jerarquía, zoom y avisos flotantes, tarjeta al pasar el ratón, progreso en el panel, aviso al pasarse de plazas, móvil sin que la lista tape el plano | `4d1c71b` |
 
 ### Encargo "cinco mejoras del planificador" (en curso)
 
@@ -53,12 +54,15 @@ y Data API (la URL del proyecto).
 |---|---|---|
 | 1 | Sala configurable en la boda, `template_id`, formas nuevas, catálogo de 12 modelos | Hecha — `8b3bed6` |
 | 2 | Selector de modelos con miniaturas generadas por la misma geometría, presets S/M/L y medida libre, aviso "fuera de sala" con reubicación explícita | Hecha — `299cc0d` |
-| 3 | Escala visual de mesas independiente de la real (`escalaVisualMesa`, automático acotado a 1,0–1,6, deslizador, compensación de etiquetas) | **Siguiente** |
+| 3 | Escala visual de mesas independiente de la real: automático con margen del 30 % acotado a 1,0–1,6, deslizador recordado en el navegador, aviso de vista no fiel, rótulos compensados y ocultos por debajo de un umbral. Vive en `src/lib/vista.ts` | Hecha — `4d1c71b` |
 | 4 | Nombres de mesa: ya existe el campo, autonumeración sin renumerar y edición en el inspector. Falta doble clic en el plano, esquemas masivos (numérico, alfabético) y aviso de duplicados | Pendiente |
-| 5 | Hover sobre mesa con lista y ocupación, panel lateral por toque, resaltado bidireccional lista ↔ plano, iniciales con umbral de zoom. **A nivel de mesa**, no de silla | Pendiente |
+| 5 | **A nivel de mesa.** Hecho: tarjeta al pasar el ratón con ocupación y ocupantes, panel lateral al tocar, nombres dentro de la mesa por encima de un umbral de zoom. Falta: resaltado bidireccional lista ↔ plano | Parcial — `4d1c71b` |
 
 Criterios que el usuario dejó fuera de esta iteración: el test del invariante de escalas
 (se verifica en el navegador) y todo lo relativo a la exportación imprimible.
+
+Invariante verificado el 27/09/2026 en producción: con escala visual 1,0, 1,16 y 1,6 las
+posiciones de las 16 mesas son idénticas; solo cambia el `scale()` del dibujo.
 
 ## Decisiones tomadas y por qué
 
@@ -94,15 +98,20 @@ Criterios que el usuario dejó fuera de esta iteración: el test del invariante 
 ## Problemas conocidos
 
 - **Supabase pausa el proyecto si no se usa.** El plan gratuito lo pausó por inactividad
-  y el 25/09/2026 producción daba error 500 en `/b/...`, porque el dominio
-  `mwwpbxcomogudsbaxyzw.supabase.co` dejó de resolver. Se reactivó desde el panel con
-  *Restore project* sin perder nada (150 invitados, 17 mesas, 73 asignaciones, 1 regla).
-  Si vuelve a pasar: mismo botón. Si algún día el proyecto ya no aparece, crear uno
-  nuevo, ejecutar las cuatro migraciones y cambiar las dos claves en `.env.local` y en
-  Vercel.
-- **Datos de prueba desordenados** en la boda `ines-santi-7k2mq4x9`: 150 invitados
-  inventados, mesas por encima de su capacidad y la presidencial a 120 cm de la Mesa 15
-  tras crecer de 180 a 300 cm con el catálogo. Montar una plantilla de sala lo rehace.
+  el 25/09/2026 y producción dio error 500. Se reactivó con *Restore project* sin perder
+  nada. **Desde `4d1c71b` hay un latido diario:** Vercel llama a `/api/latido` cada día a
+  las 7:00 UTC (`vercel.json`) y eso basta para que no se pause. Si aun así volviera a
+  pasar, mismo botón. Si el proyecto desapareciera, crear uno nuevo, ejecutar las cuatro
+  migraciones y cambiar las dos claves en `.env.local` y en Vercel.
+- **La clave secreta de Supabase ha pasado por una conversación.** Conviene generar una
+  nueva y cambiarla en `.env.local` y en Vercel.
+- **Datos de prueba:** la boda `ines-santi-7k2mq4x9` tiene 150 invitados inventados,
+  montados el 27/09/2026 con la plantilla Banquete (presidencial + 15 redondas de 10) y
+  repartidos por familias. 8 grupos quedan partidos porque hay 150 plazas exactas.
+- **En desarrollo**, la recarga en caliente reinicia el planificador con los datos de
+  cuando se abrió la página. Recargar la página lo arregla. En producción no ocurre.
+- **En móvil no hay zoom con dos dedos** (el lienzo lo bloquea para poder arrastrar);
+  se usan los botones + y −.
 - El contador del botón **Reglas** muestra el total si todo va bien y las incumplidas si
   algo falla; solo lo distingue el color.
 - **U y E** ocupan su rectángulo envolvente para colisión, con el hueco central incluido.

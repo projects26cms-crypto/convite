@@ -56,8 +56,11 @@ No hay login. El acceso es por URL `/b/[slug]`, con un `slug` no adivinable (nom
 - **La escala de render es solo presentación** (`vista.escala` en el planificador).
 - **Ninguna validación lee valores de render**: colisión, separación, perímetro y
   capacidad operan en cm. El arrastre convierte con `delta / vista.escala` y persiste cm.
-- Cualquier cambio futuro de "escala visual" no puede tocar `src/lib/mesas.ts` ni
-  `src/lib/modelos.ts`.
+- La escala visual de las mesas vive en `src/lib/vista.ts` y solo entra en un `scale()`
+  de CSS. `mesas.ts` y `modelos.ts` no pueden importar `vista.ts`, ni nada de validación
+  puede leerla. Al mover una mesa se dibuja a escala real.
+- Los rótulos del plano se dimensionan dividiendo por (zoom × escala visual), para salir
+  siempre al mismo tamaño en pantalla.
 
 ## Mapa del código
 
@@ -66,6 +69,8 @@ No hay login. El acceso es por URL `/b/[slug]`, con un `slug` no adivinable (nom
 | Catálogo de modelos de mesa: medidas, contorno, sillas | `src/lib/modelos.ts` (`MODELOS`, `figurasDe`, `sillasDe`) |
 | Geometría, colisión, sala, plantillas de sala | `src/lib/mesas.ts` |
 | Reparto automático y reglas | `src/lib/autosentar.ts` |
+| Escala visual (solo presentación) | `src/lib/vista.ts` |
+| Latido diario contra la pausa de Supabase | `src/app/api/latido/route.ts` + `vercel.json` |
 | Importación por pegado | `src/lib/importar.ts` |
 | Server Actions | `src/lib/acciones/{invitados,mesas}.ts` |
 | Lecturas | `src/lib/datos/{bodas,invitados,mesas}.ts` |
