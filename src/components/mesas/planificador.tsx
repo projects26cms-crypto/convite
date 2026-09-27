@@ -22,7 +22,9 @@ import {
 } from "react";
 import { Maximize2, Minus, Plus, X } from "lucide-react";
 
+import { Ajustes } from "@/components/mesas/ajustes";
 import { BarraHerramientas, type Alcance } from "@/components/mesas/barra";
+import { MontarSala } from "@/components/mesas/montar-sala";
 import { Inspector } from "@/components/mesas/inspector";
 import { PanelSinSentar } from "@/components/mesas/panel";
 import { MiniaturaModelo } from "@/components/mesas/figura";
@@ -66,8 +68,6 @@ import {
 } from "@/lib/mesas";
 import type { ModeloMesa } from "@/lib/modelos";
 import {
-  ESCALA_VISUAL_MAX,
-  ESCALA_VISUAL_MIN,
   acotarEscalaVisual,
   escalaSinSolape,
   escalaVisualAutomatica,
@@ -188,6 +188,7 @@ export function Planificador({
     () => "auto",
   );
   const [encima, setEncima] = useState<string | null>(null);
+  const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
   const [lienzo, setLienzo] = useState({ ancho: 0, alto: 0 });
 
   const [pendientes, setPendientes] = useState(0);
@@ -619,6 +620,7 @@ export function Planificador({
         shape: mesa.shape,
         capacity: mesa.capacity,
         rotation: mesa.rotation,
+        template_id: mesa.template_id,
       };
 
       const siguiente = { ...mesa, ...cambios };
@@ -627,7 +629,8 @@ export function Planificador({
       if (
         cambios.shape !== undefined ||
         cambios.capacity !== undefined ||
-        cambios.rotation !== undefined
+        cambios.rotation !== undefined ||
+        cambios.template_id !== undefined
       ) {
         const resuelta = resolverPosicion(
           siguiente,
@@ -656,6 +659,7 @@ export function Planificador({
           shape: cambios.shape,
           capacity: cambios.capacity,
           rotation: cambios.rotation,
+          template_id: cambios.template_id,
         });
         if (posicion.x !== mesa.pos_x || posicion.y !== mesa.pos_y) {
           await moverMesa(slug, mesaId, posicion.x, posicion.y);
@@ -729,12 +733,18 @@ export function Planificador({
   }
 
   /** A quién afecta el reparto, según lo que haya seleccionado. */
+  const mesaElegida = mesas.find((m) => m.id === seleccionada) ?? null;
+  const libresElegida = mesaElegida
+    ? mesaElegida.capacity - (sentadosPorMesa.get(mesaElegida.id)?.length ?? 0)
+    : 0;
+
   const alcance: Alcance =
     seleccion.size > 0
       ? "marcados"
-      : seleccionada &&
-          !mesas.find((m) => m.id === seleccionada)?.is_head &&
-          !mesas.find((m) => m.id === seleccionada)?.is_locked
+      : mesaElegida &&
+          !mesaElegida.is_head &&
+          !mesaElegida.is_locked &&
+          libresElegida > 0
         ? "mesa"
         : "todos";
 
@@ -742,8 +752,8 @@ export function Planificador({
     alcance === "marcados"
       ? `Repartir a ${seleccion.size === 1 ? "1 marcado" : `los ${seleccion.size} marcados`}`
       : alcance === "mesa"
-        ? `Llenar ${mesas.find((m) => m.id === seleccionada)?.name ?? "la mesa"}`
-        : "Sentar por familias";
+        ? `Llenar ${mesaElegida?.name} (${libresElegida} ${libresElegida === 1 ? "libre" : "libres"})`
+        : "Sentar automáticamente";
 
   /** No sienta a nadie: propone y espera confirmación. */
   function proponerReparto() {
@@ -1189,6 +1199,7 @@ export function Planificador({
       return;
     }
     setSeleccionada(mesa.id);
+    setAjustesAbiertos(false);
   }
 
   const mesaSeleccionada = mesas.find((m) => m.id === seleccionada) ?? null;
@@ -1219,7 +1230,6 @@ export function Planificador({
           grupoDe={grupoDe}
           seleccion={seleccion}
           verRechazados={verRechazados}
-          setVerRechazados={setVerRechazados}
           alPulsarInvitado={(id, e) => marcar([id], e, sinSentar.map((i) => i.id))}
           alPulsarGrupo={(ids, e) => marcar(ids, e)}
           sentados={Object.keys(asientos).length}
@@ -1229,18 +1239,11 @@ export function Planificador({
 
         <div className="flex min-h-[80dvh] min-w-0 flex-1 flex-col lg:min-h-0">
           <BarraHerramientas
-            mesas={mesas.filter((m) => !m.is_head).length}
             todasLasMesas={mesas}
             invitados={invitados}
             asientos={asientos}
             hayPresidencial={presidencial !== null}
-            aSentar={aSentar}
-            nivel={nivel}
-            setNivel={setNivel}
-            verSillas={verSillas}
-            setVerSillas={setVerSillas}
-            porBando={porBando}
-            setPorBando={setPorBando}
+            hayMesas={mesas.length > 0}
             pendientes={pendientes}
             fallo={fallo}
             puedeDeshacer={pila.length > 0}
@@ -1248,21 +1251,19 @@ export function Planificador({
             onDeshacer={deshacer}
             onAnadir={anadirUna}
             onSentarFamilias={proponerReparto}
-            onPlantilla={aplicarPlantilla}
             onIrA={irA}
-            reglas={reglas}
-            incumplidas={roto.invitados}
-            onCrearRegla={anadirRegla}
-            onBorrarRegla={quitarRegla}
             etiquetaReparto={etiquetaReparto}
             modeloElegido={modeloElegido?.id ?? null}
             onElegirModelo={(modelo) => {
               setModeloElegido(modelo);
               setFantasmaMesa(null);
             }}
-            sala={sala}
-            presetSala={presetSala}
-            onCambiarSala={cambiarSala}
+            ajustesAbiertos={ajustesAbiertos}
+            onAjustes={() => {
+              setAjustesAbiertos((v) => !v);
+              setSeleccionada(null);
+            }}
+            avisoAjustes={roto.invitados.size > 0}
           />
 
           <div
@@ -1329,7 +1330,7 @@ export function Planificador({
                   escala={vista.escala}
                   escalaVisual={escalaMesas}
                   halo={separacion / 2}
-                  mostrarHalo={moviendoMesa || seleccionada === mesa.id}
+                  mostrarHalo={moviendoMesa}
                   mostrarSillas={verSillas}
                   resaltada={mesasResaltadas.has(mesa.id)}
                   seleccionada={seleccionada === mesa.id}
@@ -1376,7 +1377,10 @@ export function Planificador({
             )}
 
             {/* Tarjeta de la mesa bajo el ratón. En táctil se usa el panel lateral. */}
-            {mesaEncima && !arrastrado && !moviendoMesa && (
+            {mesaEncima &&
+              mesaEncima.id !== seleccionada &&
+              !arrastrado &&
+              !moviendoMesa && (
               <TarjetaMesa
                 mesa={mesaEncima}
                 sentados={ordenarPorFamilia(
@@ -1451,39 +1455,6 @@ export function Planificador({
                 <Maximize2 aria-hidden className="size-4" />
               </Button>
 
-              <span aria-hidden className="mx-1 h-5 w-px bg-border" />
-
-              <label
-                htmlFor="escala-mesas"
-                className="pl-1 text-xs text-muted-foreground"
-              >
-                Mesas
-              </label>
-              <input
-                id="escala-mesas"
-                type="range"
-                min={ESCALA_VISUAL_MIN}
-                max={ESCALA_VISUAL_MAX}
-                step={0.05}
-                value={escalaElegida}
-                onChange={(e) => guardarEscala(e.target.value)}
-                aria-valuetext={`${Math.round(escalaElegida * 100)} % del tamaño real`}
-                className="w-20 accent-[var(--foreground)]"
-              />
-              <button
-                type="button"
-                onClick={() => guardarEscala("auto")}
-                aria-pressed={modoEscala === "auto"}
-                title="El mayor tamaño que no hace chocar mesas en pantalla"
-                className={cn(
-                  "rounded-md px-2 py-1 text-xs",
-                  modoEscala === "auto"
-                    ? "bg-secondary font-medium text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                Auto
-              </button>
             </div>
 
             {/* Avisos: flotan sobre el plano en lugar de empujarlo hacia abajo. */}
@@ -1497,6 +1468,31 @@ export function Planificador({
                 <Aviso tono="suave">
                   Las mesas se ven más grandes de lo que caben: la vista no es
                   fiel al montaje.
+                </Aviso>
+              )}
+
+              {roto.invitados.size > 0 && !ajustesAbiertos && (
+                <Aviso tono="peligro">
+                  {(() => {
+                    const n = reglas.filter(
+                      (r) =>
+                        roto.invitados.has(r.guest_a) ||
+                        roto.invitados.has(r.guest_b),
+                    ).length;
+                    return n === 1
+                      ? "Hay 1 regla de quién va con quién sin cumplir."
+                      : `Hay ${n} reglas de quién va con quién sin cumplir.`;
+                  })()}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setAjustesAbiertos(true);
+                      setSeleccionada(null);
+                    }}
+                  >
+                    Revisar
+                  </Button>
                 </Aviso>
               )}
 
@@ -1556,17 +1552,68 @@ export function Planificador({
             </div>
 
             {mesas.length === 0 && (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-                <p className="max-w-sm text-center text-muted-foreground">
-                  Aún no hay mesas. Pulsa <b>Plantillas</b> y te monto la sala
-                  entera, presidencial incluida.
-                </p>
+              <div
+                data-flotante
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                className="absolute inset-0 z-20 flex items-start justify-center overflow-y-auto bg-canvas/80 p-6 backdrop-blur-sm"
+              >
+                <div className="my-auto w-full max-w-3xl rounded-xl border border-border bg-card p-6 shadow-lg">
+                  <h2 className="font-display text-2xl tracking-tight">
+                    ¿Cómo quieres el salón?
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Elige una distribución y te monto todas las mesas de una
+                    vez, presidencial incluida. Luego puedes mover lo que
+                    quieras.
+                  </p>
+                  <div className="mt-5">
+                    <MontarSala
+                      aSentar={aSentar}
+                      sala={sala}
+                      separacion={separacion}
+                      hayMesas={false}
+                      onMontar={aplicarPlantilla}
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </div>
         </div>
 
-        {mesaSeleccionada && (
+        {ajustesAbiertos && (
+          <Ajustes
+            onCerrar={() => setAjustesAbiertos(false)}
+            sala={sala}
+            presetSala={presetSala}
+            onCambiarSala={cambiarSala}
+            aSentar={aSentar}
+            separacion={separacion}
+            hayMesas={mesas.length > 0}
+            onMontar={aplicarPlantilla}
+            invitados={invitados}
+            reglas={reglas}
+            asientos={asientos}
+            incumplidas={roto.invitados}
+            onCrearRegla={anadirRegla}
+            onBorrarRegla={quitarRegla}
+            onIrA={irA}
+            nivel={nivel}
+            setNivel={setNivel}
+            porBando={porBando}
+            setPorBando={setPorBando}
+            verRechazados={verRechazados}
+            setVerRechazados={setVerRechazados}
+            verSillas={verSillas}
+            setVerSillas={setVerSillas}
+            modoEscala={modoEscala}
+            escalaElegida={escalaElegida}
+            onEscala={guardarEscala}
+          />
+        )}
+
+        {mesaSeleccionada && !ajustesAbiertos && (
           <Inspector
             mesa={mesaSeleccionada}
             sentados={sentadosPorMesa.get(mesaSeleccionada.id) ?? []}

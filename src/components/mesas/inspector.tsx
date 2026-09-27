@@ -1,12 +1,23 @@
 "use client";
 
+import { ChevronRight, Minus, Plus, RotateCcw, RotateCw, X } from "lucide-react";
 import { useState } from "react";
 
 import { ChipInvitado } from "@/components/mesas/piezas";
 import { Button } from "@/components/ui/button";
-import { FORMATOS_PRESIDENCIAL } from "@/lib/mesas";
-import type { FormaMesa, GrupoInvitados, Invitado, Mesa } from "@/lib/tipos";
+import { FORMATOS_PRESIDENCIAL, esCircular } from "@/lib/mesas";
+import { MODELOS, modeloEquivalente, modeloPorId } from "@/lib/modelos";
+import type { GrupoInvitados, Invitado, Mesa } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
+
+/** Plazas que admite la mesa: las del modelo, o de 2 a 12 en la presidencial. */
+export function rangoDePlazas(mesa: Mesa): [number, number] {
+  if (mesa.is_head) return [2, 12];
+  const modelo =
+    modeloPorId(mesa.template_id) ??
+    modeloEquivalente(mesa.shape, mesa.capacity, false);
+  return [modelo.minimo, modelo.maximo];
+}
 
 export function Inspector({
   mesa,
@@ -35,116 +46,169 @@ export function Inspector({
   onCerrar: () => void;
   onPulsarInvitado: (id: string, e: React.MouseEvent) => void;
 }) {
-  const [pestana, setPestana] = useState<"mesa" | "gente">("gente");
   const [confirmando, setConfirmando] = useState(false);
-  const pasada = sentados.length > mesa.capacity;
-  const redonda = mesa.shape === "redonda";
+  const libres = mesa.capacity - sentados.length;
+  const circular = esCircular(mesa.shape);
+  const [minimo, maximo] = rangoDePlazas(mesa);
+  const modelo =
+    modeloPorId(mesa.template_id) ??
+    modeloEquivalente(mesa.shape, mesa.capacity, mesa.is_head);
+
+  const estado =
+    mesa.capacity === 0
+      ? "Mesa de cóctel, de pie"
+      : libres > 0
+        ? `${sentados.length} sentados · ${libres} ${libres === 1 ? "libre" : "libres"}`
+        : libres === 0
+          ? "Completa"
+          : `Te has pasado en ${-libres}`;
 
   return (
-    <aside className="flex w-full shrink-0 flex-col border-t border-border bg-sidebar lg:h-[calc(100dvh-3.5rem)] lg:w-72 lg:border-l lg:border-t-0">
-      <div className="flex items-start justify-between gap-2 border-b border-border p-3">
-        <div className="min-w-0 flex-1">
-          {mesa.is_head && (
-            <p className="text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">
-              Presidencial
-            </p>
-          )}
-          <input
-            value={mesa.name}
-            aria-label="Nombre de la mesa"
-            onChange={(e) => onCambiar({ name: e.target.value }, false)}
-            onBlur={(e) => onCambiar({ name: e.target.value.trim() || "Mesa" })}
-            className="w-full rounded-sm bg-transparent font-display text-lg tracking-tight focus:bg-card"
-          />
-          <p
-            className={cn(
-              "text-sm tabular-nums",
-              pasada ? "font-medium text-destructive" : "text-muted-foreground",
+    <aside
+      aria-label={`Mesa ${mesa.name}`}
+      className="flex w-full shrink-0 flex-col border-t border-border bg-sidebar lg:h-[calc(100dvh-3.5rem)] lg:w-80 lg:border-l lg:border-t-0"
+    >
+      <div className="border-b border-border p-4">
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            {mesa.is_head && (
+              <p className="text-[0.65rem] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                Presidencial
+              </p>
             )}
-          >
-            {sentados.length}/{mesa.capacity} sentados
-            {pasada && " · te has pasado"}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onCerrar}
-          aria-label="Cerrar"
-          className="rounded-sm px-1.5 text-muted-foreground hover:text-foreground"
-        >
-          ×
-        </button>
-      </div>
-
-      <div className="flex gap-1 border-b border-border px-2 py-1.5" role="tablist">
-        {(
-          [
-            ["gente", `Sentados (${sentados.length})`],
-            ["mesa", "La mesa"],
-          ] as const
-        ).map(([valor, etiqueta]) => (
+            <input
+              value={mesa.name}
+              aria-label="Nombre de la mesa"
+              onChange={(e) => onCambiar({ name: e.target.value }, false)}
+              onBlur={(e) => onCambiar({ name: e.target.value.trim() || "Mesa" })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              className="-ml-1 w-full rounded-sm bg-transparent px-1 font-display text-xl tracking-tight hover:bg-card focus:bg-card"
+            />
+          </div>
           <button
-            key={valor}
             type="button"
-            role="tab"
-            aria-selected={pestana === valor}
-            onClick={() => setPestana(valor)}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-sm transition-colors",
-              pestana === valor
-                ? "bg-secondary font-medium"
-                : "text-muted-foreground hover:text-foreground",
-            )}
+            onClick={onCerrar}
+            aria-label="Cerrar"
+            className="rounded p-1 text-muted-foreground hover:text-foreground"
           >
-            {etiqueta}
+            <X aria-hidden className="size-4" />
           </button>
-        ))}
+        </div>
+
+        {mesa.capacity > 0 || maximo > 0 ? (
+          <div className="mt-3 flex items-center gap-3">
+            <div className="flex items-center rounded-md border border-input bg-card">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => onCambiar({ capacity: Math.max(minimo, mesa.capacity - 1) })}
+                disabled={mesa.capacity <= minimo}
+                aria-label="Una plaza menos"
+              >
+                <Minus aria-hidden className="size-4" />
+              </Button>
+              <span className="w-8 text-center text-sm font-medium tabular-nums">
+                {mesa.capacity}
+              </span>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => onCambiar({ capacity: Math.min(maximo, mesa.capacity + 1) })}
+                disabled={mesa.capacity >= maximo}
+                aria-label="Una plaza más"
+                title={
+                  mesa.capacity >= maximo
+                    ? "Para más plazas, cambia el modelo en Más opciones"
+                    : undefined
+                }
+              >
+                <Plus aria-hidden className="size-4" />
+              </Button>
+            </div>
+            <p
+              className={cn(
+                "text-sm",
+                libres < 0 ? "font-medium text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {estado}
+            </p>
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">{estado}</p>
+        )}
+
+        {mesa.capacity > 0 && (
+          <div className="mt-3 h-1 overflow-hidden rounded-full bg-secondary">
+            <div
+              className={cn(
+                "h-full rounded-full",
+                libres < 0 ? "bg-destructive" : "bg-novia",
+              )}
+              style={{
+                width: `${Math.min(100, (sentados.length / mesa.capacity) * 100)}%`,
+              }}
+            />
+          </div>
+        )}
       </div>
 
-      {pestana === "gente" ? (
-        <div className="min-h-24 flex-1 space-y-1 overflow-y-auto p-2">
-          {sentados.length > 0 && (
+      <div className="min-h-24 flex-1 overflow-y-auto p-2">
+        {sentados.length === 0 ? (
+          <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+            Mesa vacía. Arrastra aquí a alguien de la lista, o márcalo y pulsa
+            la mesa.
+          </p>
+        ) : (
+          <>
+            <ul className="space-y-px">
+              {sentados.map((invitado) => (
+                <li key={invitado.id} className="group flex items-center gap-1">
+                  <div className="min-w-0 flex-1">
+                    <ChipInvitado
+                      invitado={invitado}
+                      grupo={grupoDe(invitado)}
+                      desdeMesa={mesa.id}
+                      marcado={seleccion.has(invitado.id)}
+                      alPulsar={(e) => onPulsarInvitado(invitado.id, e)}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onLevantar(invitado.id)}
+                    aria-label={`Levantar a ${invitado.full_name}`}
+                    title="Devolver a la lista"
+                    className="rounded px-1.5 py-1 text-muted-foreground opacity-60 hover:text-foreground group-hover:opacity-100"
+                  >
+                    <X aria-hidden className="size-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
             <button
               type="button"
               onClick={onVaciar}
-              className="mb-1 w-full rounded-sm px-2 py-1 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+              className="mt-2 w-full rounded-md px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
             >
-              Vaciar la mesa · devuelve a los {sentados.length} a la lista
+              Vaciar la mesa
             </button>
-          )}
-          {sentados.length === 0 ? (
-            <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-              Mesa vacía. Arrastra gente aquí, o marca en la lista y haz clic en
-              la mesa.
-            </p>
-          ) : (
-            sentados.map((invitado) => (
-              <div key={invitado.id} className="flex items-center gap-1">
-                <div className="min-w-0 flex-1">
-                  <ChipInvitado
-                    invitado={invitado}
-                    grupo={grupoDe(invitado)}
-                    desdeMesa={mesa.id}
-                    marcado={seleccion.has(invitado.id)}
-                    alPulsar={(e) => onPulsarInvitado(invitado.id, e)}
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onLevantar(invitado.id)}
-                  aria-label={`Levantar a ${invitado.full_name}`}
-                  title="Devolver a sin sentar"
-                  className="rounded-sm px-1.5 py-1 text-sm text-muted-foreground hover:text-foreground"
-                >
-                  ←
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      ) : (
-        <div className="flex-1 space-y-3 overflow-y-auto p-3">
-          {mesa.is_head && (
+          </>
+        )}
+      </div>
+
+      <details className="group border-t border-border [&_summary::-webkit-details-marker]:hidden">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm hover:bg-secondary/50">
+          <ChevronRight
+            aria-hidden
+            className="size-4 text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none"
+          />
+          Más opciones
+        </summary>
+
+        <div className="space-y-4 px-4 pb-4">
+          {mesa.is_head ? (
             <label className="block text-sm">
               <span className="text-muted-foreground">Quién se sienta</span>
               <select
@@ -156,103 +220,87 @@ export function Inspector({
                   const formato = FORMATOS_PRESIDENCIAL.find(
                     (f) => f.plazas === Number(e.target.value),
                   );
-                  if (formato) {
-                    onCambiar({
-                      shape: formato.shape,
-                      capacity: formato.plazas,
-                    });
-                  }
+                  if (formato) onCambiar({ capacity: formato.plazas });
                 }}
                 className="mt-1 h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
               >
-                {FORMATOS_PRESIDENCIAL.map((formato) => (
-                  <option key={formato.plazas} value={formato.plazas}>
-                    {formato.nombre} · {formato.pie}
+                {FORMATOS_PRESIDENCIAL.map((f) => (
+                  <option key={f.plazas} value={f.plazas}>
+                    {f.nombre} · {f.pie}
                   </option>
                 ))}
-                {!FORMATOS_PRESIDENCIAL.some(
-                  (f) => f.plazas === mesa.capacity,
-                ) && <option value="">A medida ({mesa.capacity})</option>}
+                {!FORMATOS_PRESIDENCIAL.some((f) => f.plazas === mesa.capacity) && (
+                  <option value="">A medida ({mesa.capacity})</option>
+                )}
+              </select>
+            </label>
+          ) : (
+            <label className="block text-sm">
+              <span className="text-muted-foreground">Modelo</span>
+              <select
+                value={modelo.id}
+                onChange={(e) => {
+                  const nuevo = modeloPorId(e.target.value);
+                  if (!nuevo) return;
+                  // «Redonda 12» trae sus 12 plazas: es lo que dice el nombre.
+                  onCambiar({
+                    template_id: nuevo.id,
+                    shape: nuevo.shape,
+                    capacity: nuevo.capacidad,
+                  });
+                }}
+                className="mt-1 h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
+              >
+                {MODELOS.filter((m) => m.id !== "presidencial").map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.nombre}
+                  </option>
+                ))}
               </select>
             </label>
           )}
 
-          <label className="block text-sm">
-            <span className="text-muted-foreground">Forma</span>
-            <select
-              value={mesa.shape}
-              onChange={(e) => onCambiar({ shape: e.target.value as FormaMesa })}
-              className="mt-1 h-9 w-full rounded-md border border-input bg-card px-2 text-sm"
-            >
-              <option value="redonda">Redonda</option>
-              <option value="rectangular">Rectangular</option>
-              <option value="imperial">Imperial</option>
-            </select>
-          </label>
-
-          <label className="block text-sm">
-            <span className="text-muted-foreground">Plazas</span>
-            <input
-              type="number"
-              min={1}
-              max={40}
-              value={mesa.capacity}
-              onChange={(e) =>
-                onCambiar({ capacity: Number(e.target.value) }, false)
-              }
-              onBlur={(e) =>
-                onCambiar({
-                  capacity: Math.min(
-                    40,
-                    Math.max(1, Number(e.target.value) || 1),
-                  ),
-                })
-              }
-              className="mt-1 h-9 w-full rounded-md border border-input bg-card px-2 text-sm tabular-nums"
-            />
-          </label>
-
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={mesa.is_locked}
-              onChange={(e) => onFijar(e.target.checked)}
-              className="size-3.5 accent-[var(--foreground)]"
-            />
-            <span>
-              Fijar la mesa
-              <span className="block text-xs text-muted-foreground">
-                El reparto automático no la toca
-              </span>
-            </span>
-          </label>
-
-          <div className="text-sm">
-            <span className="text-muted-foreground">Giro</span>
-            <div className="mt-1 flex items-center gap-1">
+          {!circular && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Girar</span>
               <Button
-                size="sm"
+                size="icon-sm"
                 variant="secondary"
-                disabled={redonda}
                 onClick={() => onCambiar({ rotation: mesa.rotation - 15 })}
                 aria-label="Girar a la izquierda"
               >
-                ↺
+                <RotateCcw aria-hidden className="size-4" />
               </Button>
               <Button
-                size="sm"
+                size="icon-sm"
                 variant="secondary"
-                disabled={redonda}
                 onClick={() => onCambiar({ rotation: mesa.rotation + 15 })}
                 aria-label="Girar a la derecha"
               >
-                ↻
+                <RotateCw aria-hidden className="size-4" />
               </Button>
-              <span className="ml-1 text-sm tabular-nums text-muted-foreground">
-                {redonda ? "Da igual en redonda" : `${mesa.rotation % 360}°`}
+              <span className="tabular-nums text-muted-foreground">
+                {((mesa.rotation % 360) + 360) % 360}°
               </span>
             </div>
-          </div>
+          )}
+
+          {!mesa.is_head && (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={mesa.is_locked}
+                onChange={(e) => onFijar(e.target.checked)}
+                className="mt-0.5 size-3.5 accent-[var(--foreground)]"
+              />
+              <span>
+                Que el reparto automático no la toque
+                <span className="block text-xs text-muted-foreground">
+                  Útil cuando ya la tienes como quieres.
+                </span>
+              </span>
+            </label>
+          )}
 
           {mesa.is_head && (
             <p className="rounded-md bg-secondary p-2 text-xs leading-relaxed text-muted-foreground">
@@ -261,42 +309,40 @@ export function Inspector({
               la novia.
             </p>
           )}
-        </div>
-      )}
 
-      <div className="flex items-center gap-2 border-t border-border p-3">
-        {mesa.is_head ? (
-          <p className="text-xs text-muted-foreground">
-            La presidencial no se duplica ni se borra.
-          </p>
-        ) : confirmando ? (
-          <>
-            <Button size="sm" variant="destructive" onClick={onBorrar}>
-              Borrar mesa
-            </Button>
-            <button
-              type="button"
-              onClick={() => setConfirmando(false)}
-              className="text-sm text-muted-foreground"
-            >
-              No
-            </button>
-          </>
-        ) : (
-          <>
-            <Button size="sm" variant="secondary" onClick={onDuplicar}>
-              Duplicar
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setConfirmando(true)}
-            >
-              Borrar
-            </Button>
-          </>
-        )}
-      </div>
+          {!mesa.is_head && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {confirmando ? (
+                <>
+                  <Button size="sm" variant="destructive" onClick={onBorrar}>
+                    Sí, borrar la mesa
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmando(false)}
+                    className="text-sm text-muted-foreground"
+                  >
+                    No
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Button size="sm" variant="secondary" onClick={onDuplicar}>
+                    Duplicar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setConfirmando(true)}
+                  >
+                    Borrar la mesa
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </details>
     </aside>
   );
 }

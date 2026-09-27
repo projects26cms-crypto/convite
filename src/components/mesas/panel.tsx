@@ -109,7 +109,6 @@ export function PanelSinSentar({
   grupoDe,
   seleccion,
   verRechazados,
-  setVerRechazados,
   alPulsarInvitado,
   alPulsarGrupo,
   sentados,
@@ -126,7 +125,6 @@ export function PanelSinSentar({
   grupoDe: (invitado: Invitado) => GrupoInvitados | undefined;
   seleccion: Set<string>;
   verRechazados: boolean;
-  setVerRechazados: (v: boolean) => void;
   alPulsarInvitado: (id: string, e: React.MouseEvent) => void;
   alPulsarGrupo: (ids: string[], e: React.MouseEvent) => void;
 }) {
@@ -220,15 +218,6 @@ export function PanelSinSentar({
           aria-label="Buscar invitado sin sentar"
           className="mt-4 h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
         />
-        <label className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={verRechazados}
-            onChange={(e) => setVerRechazados(e.target.checked)}
-            className="size-3 accent-[var(--foreground)]"
-          />
-          Mostrar a quien no viene
-        </label>
       </div>
 
       <div className="min-h-24 flex-1 space-y-3 overflow-y-auto px-2 py-3">

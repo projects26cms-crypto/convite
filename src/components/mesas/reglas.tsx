@@ -14,6 +14,7 @@ export function PanelReglas({
   onCrear,
   onBorrar,
   onIrA,
+  className,
 }: {
   invitados: Invitado[];
   reglas: Regla[];
@@ -22,6 +23,7 @@ export function PanelReglas({
   onCrear: (kind: TipoRegla, a: string, b: string) => void;
   onBorrar: (id: string) => void;
   onIrA: (invitadoId: string, mesaId: string | null) => void;
+  className?: string;
 }) {
   const [kind, setKind] = useState<TipoRegla>("separados");
   const [a, setA] = useState("");
@@ -42,7 +44,7 @@ export function PanelReglas({
   const nombre = (id: string) => porId.get(id)?.full_name ?? "—";
 
   return (
-    <div className="border-t border-border bg-card px-4 py-4">
+    <div className={cn("border-t border-border bg-card px-4 py-4", className)}>
       <p className="text-sm text-muted-foreground">
         Marca quién no puede acabar en la misma mesa, o quién tiene que ir
         junto. El reparto automático las respeta y el lienzo avisa en rojo si te

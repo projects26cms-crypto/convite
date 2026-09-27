@@ -2,6 +2,10 @@
 
 Última actualización: 27 de septiembre de 2026. Último commit: `4d1c71b`.
 
+> **Fase de demo.** La aplicación no está publicada para uso real: la usa la propia
+> pareja para probarla. Por eso quedan fuera, por decisión del usuario del 27/09/2026,
+> el plano imprimible y el cambio de la clave secreta de Supabase.
+
 ## Dónde vive cada cosa
 
 | Recurso | Ubicación |
@@ -87,8 +91,7 @@ posiciones de las 16 mesas son idénticas; solo cambia el `scale()` del dibujo.
 
 - **Sillas concretas:** asignar invitado a silla numerada. Iteración propia. Toca modelo,
   arrastre, reparto, reglas y geometría. `seat_assignments.seat_number` ya existe.
-- **Plano imprimible:** A4 horizontal a escala real, listado alfabético invitado → mesa y
-  listado por mesa.
+- **Plano imprimible:** descartado mientras dure la demo.
 - **Landing y creación de boda:** hoy la portada dice "En construcción" y **no hay forma
   de crear una boda sin SQL**. `generarSlug()` ya existe en `src/lib/slug.ts`.
 - **Propuestas descartadas por ahora:** panel de revisión de problemas y versiones
@@ -103,8 +106,8 @@ posiciones de las 16 mesas son idénticas; solo cambia el `scale()` del dibujo.
   las 7:00 UTC (`vercel.json`) y eso basta para que no se pause. Si aun así volviera a
   pasar, mismo botón. Si el proyecto desapareciera, crear uno nuevo, ejecutar las cuatro
   migraciones y cambiar las dos claves en `.env.local` y en Vercel.
-- **La clave secreta de Supabase ha pasado por una conversación.** Conviene generar una
-  nueva y cambiarla en `.env.local` y en Vercel.
+- **La clave secreta de Supabase ha pasado por una conversación.** Descartado cambiarla
+  mientras sea una demo; hacerlo antes de meter datos reales de invitados.
 - **Datos de prueba:** la boda `ines-santi-7k2mq4x9` tiene 150 invitados inventados,
   montados el 27/09/2026 con la plantilla Banquete (presidencial + 15 redondas de 10) y
   repartidos por familias. 8 grupos quedan partidos porque hay 150 plazas exactas.
