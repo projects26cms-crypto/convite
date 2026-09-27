@@ -87,6 +87,7 @@ export function Ajustes({
   modoEscala,
   escalaElegida,
   onEscala,
+  onVerConsejos,
 }: {
   onCerrar: () => void;
   sala: Sala;
@@ -114,6 +115,7 @@ export function Ajustes({
   modoEscala: string;
   escalaElegida: number;
   onEscala: (valor: string) => void;
+  onVerConsejos: () => void;
 }) {
   const sinCumplir = reglas.filter(
     (r) => incumplidas.has(r.guest_a) || incumplidas.has(r.guest_b),
@@ -357,6 +359,14 @@ export function Ajustes({
             </p>
           </div>
         </Seccion>
+
+        <button
+          type="button"
+          onClick={onVerConsejos}
+          className="w-full px-4 py-3 text-left text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          Ver otra vez cómo se sienta a la gente
+        </button>
       </div>
     </aside>
   );

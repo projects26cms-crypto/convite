@@ -17,10 +17,9 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   useTransition,
 } from "react";
-import { Maximize2, Minus, Plus, X } from "lucide-react";
+import { Hand, Maximize2, Minus, MousePointerClick, Move, Plus, X } from "lucide-react";
 
 import { Ajustes } from "@/components/mesas/ajustes";
 import { BarraHerramientas, type Alcance } from "@/components/mesas/barra";
@@ -72,6 +71,7 @@ import {
   escalaSinSolape,
   escalaVisualAutomatica,
 } from "@/lib/vista";
+import { usePreferencia } from "@/lib/preferencias";
 import { cn } from "@/lib/utils";
 import type {
   Asignacion,
@@ -88,42 +88,6 @@ const ESCALA_MIN = 0.12;
 const ESCALA_MAX = 1.4;
 
 type Paso = { etiqueta: string; deshacer: () => void };
-
-/**
- * El tamaño de las mesas en pantalla es una preferencia de quien mira, no un
- * dato del plano: se guarda en este navegador. Si el almacenamiento falla, se
- * recuerda mientras dure la sesión.
- */
-const CLAVE_ESCALA = "convite:escala-mesas";
-const EVENTO_ESCALA = "convite:escala-mesas";
-let escalaEnMemoria = "auto";
-
-function leerEscala(): string {
-  try {
-    return window.localStorage.getItem(CLAVE_ESCALA) ?? escalaEnMemoria;
-  } catch {
-    return escalaEnMemoria;
-  }
-}
-
-function guardarEscala(valor: string) {
-  escalaEnMemoria = valor;
-  try {
-    window.localStorage.setItem(CLAVE_ESCALA, valor);
-  } catch {
-    // Sin almacenamiento: vale con la memoria de la sesión.
-  }
-  window.dispatchEvent(new Event(EVENTO_ESCALA));
-}
-
-function suscribirEscala(avisar: () => void) {
-  window.addEventListener("storage", avisar);
-  window.addEventListener(EVENTO_ESCALA, avisar);
-  return () => {
-    window.removeEventListener("storage", avisar);
-    window.removeEventListener(EVENTO_ESCALA, avisar);
-  };
-}
 
 /** Longitud de la barra de escala: la mayor que quepa en unos 110 px. */
 function tramoDeEscala(pxPorCm: number): number {
@@ -182,10 +146,13 @@ export function Planificador({
     pares: Par[];
     resumen: string;
   } | null>(null);
-  const modoEscala = useSyncExternalStore(
-    suscribirEscala,
-    leerEscala,
-    () => "auto",
+  const [modoEscala, guardarEscala] = usePreferencia(
+    "convite:escala-mesas",
+    "auto",
+  );
+  const [consejos, setConsejos] = usePreferencia(
+    "convite:consejos",
+    "pendientes",
   );
   const [encima, setEncima] = useState<string | null>(null);
   const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
@@ -1407,6 +1374,48 @@ export function Planificador({
               />
             )}
 
+            {mesas.length > 0 && consejos === "pendientes" && (
+              <div
+                data-flotante
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                role="note"
+                aria-label="Cómo se usa el plano"
+                className="absolute left-4 top-4 z-30 w-72 rounded-xl border border-border bg-card p-4 shadow-lg"
+              >
+                <p className="font-display text-lg leading-tight">
+                  Así se sienta a la gente
+                </p>
+                <ul className="mt-3 space-y-3 text-sm">
+                  <li className="flex gap-3">
+                    <Hand aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <span>Arrastra a alguien de la lista hasta una mesa.</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <MousePointerClick aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <span>
+                      O púlsalo y después pulsa la mesa. Pulsando el nombre de
+                      una familia la marcas entera.
+                    </span>
+                  </li>
+                  <li className="flex gap-3">
+                    <Move aria-hidden className="size-4 mt-0.5 shrink-0 text-muted-foreground" />
+                    <span>
+                      Arrastra el fondo para moverte y usa la rueda para
+                      acercarte.
+                    </span>
+                  </li>
+                </ul>
+                <Button
+                  size="sm"
+                  className="mt-4 w-full"
+                  onClick={() => setConsejos("vistos")}
+                >
+                  Entendido
+                </Button>
+              </div>
+            )}
+
             {/* Escala gráfica */}
             <div
               aria-hidden
@@ -1610,6 +1619,10 @@ export function Planificador({
             modoEscala={modoEscala}
             escalaElegida={escalaElegida}
             onEscala={guardarEscala}
+            onVerConsejos={() => {
+              setConsejos("pendientes");
+              setAjustesAbiertos(false);
+            }}
           />
         )}
 

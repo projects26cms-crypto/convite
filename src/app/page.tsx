@@ -1,3 +1,8 @@
+import Link from "next/link";
+
+/** La boda de ejemplo con la que se enseña la aplicación mientras sea una demo. */
+const DEMO = "/b/ines-santi-7k2mq4x9";
+
 const mesas = [
   { cx: 92, cy: 78, r: 30, nombre: "1", lleno: 1 },
   { cx: 210, cy: 62, r: 26, nombre: "2", lleno: 0.75 },
@@ -13,7 +18,7 @@ export default function Home() {
         <header className="flex items-baseline justify-between gap-4">
           <span className="font-display text-xl tracking-tight">Convite</span>
           <span className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-            En construcción
+            Demo
           </span>
         </header>
 
@@ -26,9 +31,20 @@ export default function Home() {
             </h1>
             <p className="mt-6 text-lg leading-relaxed text-muted-foreground">
               Invitados, mesas y plano de sala en un mismo sitio. Pegas la lista,
-              arrastras a la gente a su mesa e imprimes el plano. Sin hojas de
-              cálculo.
+              la aplicación sienta a cada familia junta y tú retocas arrastrando.
+              Sin hojas de cálculo.
             </p>
+            <div className="mt-8 flex flex-wrap items-center gap-4">
+              <Link
+                href={DEMO}
+                className="inline-flex h-11 items-center rounded-md bg-foreground px-6 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
+              >
+                Ver la demo
+              </Link>
+              <span className="text-sm text-muted-foreground">
+                Una boda de ejemplo con 150 invitados.
+              </span>
+            </div>
             <dl className="mt-10 flex flex-wrap gap-x-10 gap-y-4 text-sm">
               <div>
                 <dt className="text-muted-foreground">Bando de la novia</dt>
@@ -120,7 +136,8 @@ export default function Home() {
         </div>
 
         <footer className="border-t border-border pt-6 text-sm text-muted-foreground">
-          Cada boda vive en su propio enlace. Pronto podrás crear la tuya aquí.
+          Esto es una demo. Cada boda vive en su propio enlace, y quien lo tiene
+          puede editarla.
         </footer>
       </div>
     </main>
