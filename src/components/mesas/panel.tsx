@@ -111,6 +111,7 @@ export function PanelSinSentar({
   verRechazados,
   alPulsarInvitado,
   alPulsarGrupo,
+  alMenuInvitado,
   sentados,
   mesas,
   plazas,
@@ -127,6 +128,7 @@ export function PanelSinSentar({
   verRechazados: boolean;
   alPulsarInvitado: (id: string, e: React.MouseEvent) => void;
   alPulsarGrupo: (ids: string[], e: React.MouseEvent) => void;
+  alMenuInvitado?: (id: string, e: React.MouseEvent) => void;
 }) {
   const [busqueda, setBusqueda] = useState("");
   const [plegados, setPlegados] = useState<Set<string>>(new Set());
@@ -269,6 +271,11 @@ export function PanelSinSentar({
                         desdeMesa={null}
                         marcado={seleccion.has(invitado.id)}
                         alPulsar={(e) => alPulsarInvitado(invitado.id, e)}
+                        alMenu={
+                          alMenuInvitado
+                            ? (e) => alMenuInvitado(invitado.id, e)
+                            : undefined
+                        }
                       />
                     ))}
                   </div>

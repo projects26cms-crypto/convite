@@ -32,6 +32,7 @@ export function Inspector({
   onBorrar,
   onCerrar,
   onPulsarInvitado,
+  onMenuInvitado,
 }: {
   mesa: Mesa;
   sentados: Invitado[];
@@ -45,6 +46,7 @@ export function Inspector({
   onBorrar: () => void;
   onCerrar: () => void;
   onPulsarInvitado: (id: string, e: React.MouseEvent) => void;
+  onMenuInvitado?: (id: string, e: React.MouseEvent) => void;
 }) {
   const [confirmando, setConfirmando] = useState(false);
   const libres = mesa.capacity - sentados.length;
@@ -173,6 +175,11 @@ export function Inspector({
                       desdeMesa={mesa.id}
                       marcado={seleccion.has(invitado.id)}
                       alPulsar={(e) => onPulsarInvitado(invitado.id, e)}
+                      alMenu={
+                        onMenuInvitado
+                          ? (e) => onMenuInvitado(invitado.id, e)
+                          : undefined
+                      }
                     />
                   </div>
                   <button

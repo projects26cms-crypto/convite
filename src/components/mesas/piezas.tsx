@@ -80,6 +80,7 @@ export function ChipInvitado({
   marcado = false,
   enConflicto = false,
   alPulsar,
+  alMenu,
 }: {
   invitado: Invitado;
   grupo?: GrupoInvitados;
@@ -88,6 +89,7 @@ export function ChipInvitado({
   marcado?: boolean;
   enConflicto?: boolean;
   alPulsar?: (e: React.MouseEvent) => void;
+  alMenu?: (e: React.MouseEvent) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `inv:${invitado.id}`,
@@ -103,6 +105,12 @@ export function ChipInvitado({
       onClick={(e) => {
         e.stopPropagation();
         alPulsar?.(e);
+      }}
+      onContextMenu={(e) => {
+        if (!alMenu) return;
+        e.preventDefault();
+        e.stopPropagation();
+        alMenu(e);
       }}
       className={cn(
         "block w-full cursor-grab touch-none rounded-md active:cursor-grabbing",
@@ -156,6 +164,9 @@ export function MesaEnLienzo({
   alPulsar,
   alEntrar,
   alSalir,
+  alMenu,
+  alMenuInvitado,
+  alDobleClic,
 }: {
   mesa: Mesa;
   sentados: Invitado[];
@@ -176,6 +187,9 @@ export function MesaEnLienzo({
   alPulsar: (e: React.MouseEvent) => void;
   alEntrar?: (e: React.PointerEvent) => void;
   alSalir?: () => void;
+  alMenu?: (e: React.MouseEvent) => void;
+  alMenuInvitado?: (invitadoId: string, e: React.MouseEvent) => void;
+  alDobleClic?: () => void;
 }) {
   const { ancho, alto } = tamanoMesa(mesa);
   const pasada = sentados.length > mesa.capacity;
@@ -245,6 +259,12 @@ export function MesaEnLienzo({
       <div
         ref={anclarSoltar}
         onClick={alPulsar}
+        onDoubleClick={alDobleClic}
+        onContextMenu={(e) => {
+          if (!alMenu) return;
+          e.preventDefault();
+          alMenu(e);
+        }}
         className="relative h-full w-full"
       >
         <svg
@@ -361,6 +381,11 @@ export function MesaEnLienzo({
                   grupo={grupoDe(invitado)}
                   desdeMesa={mesa.id}
                   compacto
+                  alMenu={
+                    alMenuInvitado
+                      ? (e) => alMenuInvitado(invitado.id, e)
+                      : undefined
+                  }
                 />
               ))}
               {ocultos > 0 && (

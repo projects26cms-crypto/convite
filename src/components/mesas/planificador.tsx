@@ -23,6 +23,11 @@ import { Hand, Maximize2, Minus, MousePointerClick, Move, Plus, X } from "lucide
 
 import { Ajustes } from "@/components/mesas/ajustes";
 import { BarraHerramientas, type Alcance } from "@/components/mesas/barra";
+import {
+  MenuContextual,
+  type AccionesMenu,
+  type DestinoMenu,
+} from "@/components/mesas/menu-contextual";
 import { MontarSala } from "@/components/mesas/montar-sala";
 import { Inspector } from "@/components/mesas/inspector";
 import { PanelSinSentar } from "@/components/mesas/panel";
@@ -156,6 +161,12 @@ export function Planificador({
   );
   const [encima, setEncima] = useState<string | null>(null);
   const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    destino: DestinoMenu;
+  } | null>(null);
+  const [renombrando, setRenombrando] = useState<string | null>(null);
   const [lienzo, setLienzo] = useState({ ancho: 0, alto: 0 });
 
   const [pendientes, setPendientes] = useState(0);
@@ -1169,6 +1180,38 @@ export function Planificador({
     setAjustesAbiertos(false);
   }
 
+  const ocupacion = new Map(
+    [...sentadosPorMesa.entries()].map(([id, lista]) => [id, lista.length]),
+  );
+
+  const acciones: AccionesMenu = {
+    renombrar: (mesa) => setRenombrando(mesa.id),
+    duplicar: (mesa) => duplicar(mesa),
+    girar: (mesa) => cambiarMesa(mesa.id, { rotation: mesa.rotation + 15 }),
+    vaciar: (mesa) => vaciarMesa(mesa),
+    bloquear: (mesa, bloqueada) => alternarFijada(mesa, bloqueada),
+    borrar: (mesa) => quitarMesa(mesa),
+    sentar: (invitadoId, mesaId) => sentarVarios([invitadoId], mesaId),
+    levantar: (invitadoId) => levantarA([invitadoId]),
+    regla: (kind, a, b) => {
+      anadirRegla(kind, a, b);
+      const nombreA = porId.get(a)?.full_name ?? "";
+      const nombreB = porId.get(b)?.full_name ?? "";
+      setNota(
+        kind === "juntos"
+          ? `${nombreA} y ${nombreB} irán juntos al sentar automáticamente.`
+          : `${nombreA} y ${nombreB} no se sentarán en la misma mesa.`,
+      );
+    },
+  };
+
+  const abrirMenu = (destino: DestinoMenu) => (e: React.MouseEvent) => {
+    setEncima(null);
+    setMenu({ x: e.clientX, y: e.clientY, destino });
+  };
+
+  const mesaRenombrando = mesas.find((m) => m.id === renombrando) ?? null;
+
   const mesaSeleccionada = mesas.find((m) => m.id === seleccionada) ?? null;
   const mesaEncima = mesas.find((m) => m.id === encima) ?? null;
   const plazas = mesas.reduce((suma, m) => suma + m.capacity, 0);
@@ -1199,6 +1242,7 @@ export function Planificador({
           verRechazados={verRechazados}
           alPulsarInvitado={(id, e) => marcar([id], e, sinSentar.map((i) => i.id))}
           alPulsarGrupo={(ids, e) => marcar(ids, e)}
+          alMenuInvitado={(id, e) => abrirMenu({ tipo: "invitado", id })(e)}
           sentados={Object.keys(asientos).length}
           mesas={mesas.length}
           plazas={plazas}
@@ -1311,6 +1355,11 @@ export function Planificador({
                       setEncima(mesa.id);
                   }}
                   alSalir={() => setEncima(null)}
+                  alMenu={abrirMenu({ tipo: "mesa", id: mesa.id })}
+                  alMenuInvitado={(id, e) =>
+                    abrirMenu({ tipo: "invitado", id })(e)
+                  }
+                  alDobleClic={() => setRenombrando(mesa.id)}
                 />
               ))}
             </div>
@@ -1414,6 +1463,22 @@ export function Planificador({
                   Entendido
                 </Button>
               </div>
+            )}
+
+            {mesaRenombrando && (
+              <CajaRenombrar
+                key={mesaRenombrando.id}
+                nombre={mesaRenombrando.name}
+                x={vista.x + mesaRenombrando.pos_x * vista.escala}
+                y={vista.y + mesaRenombrando.pos_y * vista.escala}
+                onGuardar={(nombre) => {
+                  if (nombre && nombre !== mesaRenombrando.name) {
+                    cambiarMesa(mesaRenombrando.id, { name: nombre });
+                  }
+                  setRenombrando(null);
+                }}
+                onCancelar={() => setRenombrando(null)}
+              />
             )}
 
             {/* Escala gráfica */}
@@ -1641,6 +1706,7 @@ export function Planificador({
             onDuplicar={() => duplicar(mesaSeleccionada)}
             onBorrar={() => quitarMesa(mesaSeleccionada)}
             onCerrar={() => setSeleccionada(null)}
+            onMenuInvitado={(id, e) => abrirMenu({ tipo: "invitado", id })(e)}
             onPulsarInvitado={(id, e) =>
               marcar(
                 [id],
@@ -1651,6 +1717,20 @@ export function Planificador({
           />
         )}
       </div>
+
+      {menu && (
+        <MenuContextual
+          x={menu.x}
+          y={menu.y}
+          destino={menu.destino}
+          mesas={mesas}
+          invitados={invitados}
+          asientos={asientos}
+          ocupacion={ocupacion}
+          acciones={acciones}
+          onCerrar={() => setMenu(null)}
+        />
+      )}
 
       <DragOverlay dropAnimation={null}>
         {arrastrado && arrastrado.length > 0 ? (
@@ -1792,5 +1872,51 @@ function TarjetaMesa({
         </ul>
       )}
     </div>
+  );
+}
+
+/** Cambiar el nombre de una mesa sin salir del plano. Enter guarda, Escape no. */
+function CajaRenombrar({
+  nombre,
+  x,
+  y,
+  onGuardar,
+  onCancelar,
+}: {
+  nombre: string;
+  x: number;
+  y: number;
+  onGuardar: (nombre: string) => void;
+  onCancelar: () => void;
+}) {
+  const [valor, setValor] = useState(nombre);
+  // Enter y la pérdida de foco pueden llegar los dos: se guarda una sola vez.
+  const cerrada = useRef(false);
+
+  const cerrar = (guardar: boolean) => {
+    if (cerrada.current) return;
+    cerrada.current = true;
+    if (guardar) onGuardar(valor.trim());
+    else onCancelar();
+  };
+
+  return (
+    <input
+      data-flotante
+      autoFocus
+      value={valor}
+      aria-label={`Nuevo nombre para ${nombre}`}
+      onChange={(e) => setValor(e.target.value)}
+      onFocus={(e) => e.currentTarget.select()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") cerrar(true);
+        if (e.key === "Escape") cerrar(false);
+      }}
+      onBlur={() => cerrar(true)}
+      style={{ left: x, top: y }}
+      className="absolute z-40 h-9 w-44 -translate-x-1/2 -translate-y-1/2 rounded-md border border-foreground bg-card px-2 text-center font-display text-base shadow-lg"
+    />
   );
 }
