@@ -160,34 +160,26 @@ export function Grupos({
   cuentaPorGrupo: Record<string, number>;
   slug: string;
 }) {
-  const [abierto, setAbierto] = useState(false);
   const [estado, setEstado] = useState<EstadoAccion>(ESTADO_INICIAL);
   const formulario = useRef<HTMLFormElement>(null);
 
   return (
-    <section className="mt-10">
-      <button
-        type="button"
-        onClick={() => setAbierto((v) => !v)}
-        aria-expanded={abierto}
-        className="flex w-full items-baseline justify-between gap-4 border-b border-border pb-2 text-left"
-      >
-        <span className="font-display text-lg tracking-tight">Grupos</span>
+    <section aria-labelledby="titulo-grupos">
+      <div className="flex items-baseline justify-between gap-4 border-b border-border pb-2">
+        <h2 id="titulo-grupos" className="font-display text-lg tracking-tight">
+          Grupos
+        </h2>
         <span className="text-sm text-muted-foreground">
           {grupos.length === 0
             ? "Ninguno todavía"
             : `${grupos.length} ${grupos.length === 1 ? "grupo" : "grupos"}`}
-          {" · "}
-          {abierto ? "Ocultar" : "Ver"}
         </span>
-      </button>
+      </div>
 
-      {abierto && (
-        <div className="mt-4">
-          <p className="mb-4 text-sm text-muted-foreground">
-            Un grupo es una unidad de invitación: una familia, una pareja, una
-            cuadrilla. Al sentar en las mesas, el color del bando ayuda a no
-            separar a quien va junto.
+        <div className="mt-3">
+          <p className="mb-3 text-sm text-muted-foreground">
+            Una familia, una pareja, una cuadrilla. Quien va en el mismo grupo
+            se sienta junto, y el bando da color a sus sillas en el plano.
           </p>
 
           {grupos.length > 0 && (
@@ -247,7 +239,6 @@ export function Grupos({
             )}
           </form>
         </div>
-      )}
     </section>
   );
 }
