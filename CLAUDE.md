@@ -76,7 +76,12 @@ No hay login. El acceso es por URL `/b/[slug]`, con un `slug` no adivinable (nom
 | Lecturas | `src/lib/datos/{bodas,invitados,mesas}.ts` |
 | Planificador (estado, arrastre, vista) | `src/components/mesas/planificador.tsx` |
 | Dibujo de mesa (SVG desde el catálogo) | `src/components/mesas/{piezas,figura}.tsx` |
-| Panel, barra, inspector, reglas, selector | `src/components/mesas/*.tsx` |
+| Barra esencial y buscador | `src/components/mesas/barra.tsx` |
+| Ajustes avanzados (sala, plantillas, reglas, separación, vista) | `src/components/mesas/ajustes.tsx` |
+| Montar la sala con bocetos de plantilla | `src/components/mesas/montar-sala.tsx` |
+| Panel de una mesa | `src/components/mesas/inspector.tsx` |
+| Menú del botón derecho | `src/components/mesas/menu-contextual.tsx` |
+| Preferencias de quien mira (localStorage) | `src/lib/preferencias.ts` |
 
 **Una sola geometría:** la mesa del plano y la miniatura del selector salen de las mismas
 funciones del catálogo. No duplicar geometría en componentes.
@@ -113,6 +118,17 @@ Notas:
   grafito, `--confirmado`/`--pendiente`/`--rechazado`, `--canvas`/`--canvas-line`.
 - **Movimiento solo en el arrastre.** `prefers-reduced-motion` respetado.
 - **Copia:** verbos en activa, mayúscula solo inicial. "Sentar a Marta".
+
+## Criterio de interfaz
+
+Tres niveles, y cada cosa en uno solo:
+- **Siempre a la vista:** lo diario (añadir mesa, sentar automáticamente, buscar,
+  deshacer).
+- **Donde está la cosa:** lo que afecta a una mesa o un invitado aparece al tocarlo
+  (panel de la mesa, menú del botón derecho).
+- **Ajustes avanzados:** lo que se configura una vez o casi nunca.
+
+Antes de añadir un botón a la barra, decidir en cuál de los tres niveles va.
 
 ## Reglas de trabajo
 

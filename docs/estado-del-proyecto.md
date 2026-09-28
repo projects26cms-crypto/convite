@@ -1,6 +1,6 @@
 # Estado del proyecto
 
-Última actualización: 27 de septiembre de 2026. Último commit: `4d1c71b`.
+Última actualización: 28 de septiembre de 2026. Último commit: `35e6815`.
 
 > **Fase de demo.** La aplicación no está publicada para uso real: la usa la propia
 > pareja para probarla. Por eso quedan fuera, por decisión del usuario del 27/09/2026,
@@ -51,6 +51,10 @@ y Data API (la URL del proyecto).
 | Velocidad e interfaz | Sentar con dos clics, panel agrupado por familias, selección múltiple, sillas visibles, navegación del lienzo (paneo, rueda, ajustar), buscar y llevar | `eb8f9f8` |
 | Reglas y reparto | Reglas `juntos`/`separados`, reparto con vista previa y alcance, mesas fijadas, vaciar mesa | `6720a97` |
 | Interfaz legible | Rótulos a tamaño fijo en pantalla, sillas pintadas por bando, sala con cotas y escala gráfica, presidencial en tinta, barra con jerarquía, zoom y avisos flotantes, tarjeta al pasar el ratón, progreso en el panel, aviso al pasarse de plazas, móvil sin que la lista tape el plano | `4d1c71b` |
+| Mesas más simple | Barra con cuatro cosas; ajustes avanzados en su panel; rehacer la sala con bocetos; plano vacío que ofrece montar la sala; panel de mesa sin pestañas con plazas − y +; sin halo ni tarjeta repetida al seleccionar | `3a1579d` |
+| Guía de primeras | Portada de la boda en tres pasos con estado real, consejos la primera vez, fuera «Plano», portada web con acceso a la demo | `5f70280` |
+| Invitados conectados | Filas de lectura con su mesa, contadores que filtran al instante, grupos siempre visibles, «¿De quién es cada grupo?» tras importar | `f3c0bc8` |
+| Añadir mesa y menú | Cuatro formas comunes y el resto plegado; menú del botón derecho en mesas e invitados; doble clic para renombrar | `35e6815` |
 
 ### Encargo "cinco mejoras del planificador" (en curso)
 
@@ -59,7 +63,7 @@ y Data API (la URL del proyecto).
 | 1 | Sala configurable en la boda, `template_id`, formas nuevas, catálogo de 12 modelos | Hecha — `8b3bed6` |
 | 2 | Selector de modelos con miniaturas generadas por la misma geometría, presets S/M/L y medida libre, aviso "fuera de sala" con reubicación explícita | Hecha — `299cc0d` |
 | 3 | Escala visual de mesas independiente de la real: automático con margen del 30 % acotado a 1,0–1,6, deslizador recordado en el navegador, aviso de vista no fiel, rótulos compensados y ocultos por debajo de un umbral. Vive en `src/lib/vista.ts` | Hecha — `4d1c71b` |
-| 4 | Nombres de mesa: ya existe el campo, autonumeración sin renumerar y edición en el inspector. Falta doble clic en el plano, esquemas masivos (numérico, alfabético) y aviso de duplicados | Pendiente |
+| 4 | Nombres de mesa. Hecho: autonumeración sin renumerar, edición en el panel, doble clic y menú en el plano. Falta: esquemas masivos (numérico, alfabético) y aviso de duplicados | Parcial — `35e6815` |
 | 5 | **A nivel de mesa.** Hecho: tarjeta al pasar el ratón con ocupación y ocupantes, panel lateral al tocar, nombres dentro de la mesa por encima de un umbral de zoom. Falta: resaltado bidireccional lista ↔ plano | Parcial — `4d1c71b` |
 
 Criterios que el usuario dejó fuera de esta iteración: el test del invariante de escalas
